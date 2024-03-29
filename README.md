@@ -12,6 +12,10 @@ See [this article](https://www.synacktiv.com/publications/systemd-hardening-made
 
 ## Installation
 
+### Dependencies
+
+Strace needs to be installed and available in the path. Strace version >=6.4 is strongly recommended.
+
 ### From source
 
 You need a Rust build environment for example from [rustup](https://rustup.rs/).
