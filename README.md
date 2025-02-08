@@ -20,7 +20,7 @@ Automatic [systemd](https://systemd.io/) service hardening guided by [strace](ht
 
 ### Dependencies
 
-Strace needs to be installed and available in the path. Strace version >=6.4 is strongly recommended.
+Strace needs to be installed and its executable available in the path. A recent Strace version is strongly recommended.
 
 ### From source
 
@@ -33,7 +33,7 @@ cargo build --release
 install -Dm 755 -t /usr/local/bin target/release/shh
 ```
 
-or from `crates.io`:
+### From [`crates.io`](https://crates.io/)
 
 ```
 sudo cargo install --root /usr/local
@@ -77,6 +77,7 @@ Services running in per-user instances of the service manager (controlled via `s
 If you want to run a quick test to see what options would be generated, you can use `shh run -- COMMAND`.
 
 Current directory and `PATH` environment variable both influence the program execution, reset those first:
+
 ```
 $ cd /
 export PATH=/usr/local/bin:/usr/bin:/bin
