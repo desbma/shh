@@ -1,7 +1,9 @@
 //! Systemd service actions
 
 use std::{
-    env, fmt,
+    env,
+    ffi::OsString,
+    fmt,
     fs::{self, File},
     io::{self, BufRead as _, BufReader, BufWriter, Write},
     ops::RangeInclusive,
@@ -99,6 +101,53 @@ impl Service {
         )
     }
 
+    // A function for locating the parent directory i.e. PATH of an executable
+    fn resolve_exec_path<P>(exe_name: &P, path_env: &OsString) -> Option<PathBuf>
+    where
+        P: AsRef<Path> + ?Sized,
+    {
+        env::split_paths(&path_env).find_map(|dir| {
+            let full_path = dir.join(exe_name);
+            full_path.is_file().then_some(dir)
+        })
+    }
+
+    // determine PATH env used for unit
+    pub(crate) fn get_exec_path(config_paths: &[&Path]) -> anyhow::Result<String> {
+        let old_path_env_option = Self::config_vals("Environment", config_paths)?
+            .into_iter()
+            .filter(|x| x.starts_with("\"PATH="))
+            .next_back()
+            .map(|x| {
+                x.trim_matches('\"')
+                    .get(5..)
+                    .expect("Path Environment expression is malformed")
+                    .to_owned()
+            });
+        if let Some(path_env) = old_path_env_option {
+            log::info!("Found hard coded PATH environment in unit: {path_env}");
+            Ok(path_env)
+        } else {
+            let output = Command::new("systemd-path")
+                .arg("search-binaries-default")
+                .output()?;
+            if !output.status.success() {
+                anyhow::bail!(
+                    "systemd-path invocation failed with code {:?}",
+                    output.status
+                );
+            }
+            let default_systemd_path =
+                output.stdout.lines().next().ok_or_else(|| {
+                    anyhow::anyhow!("Unable to get global systemd default PATH")
+                })??;
+            log::info!(
+                "Could not find hard coded PATH environment in unit, using systemd default: {default_systemd_path}"
+            );
+            Ok(default_systemd_path)
+        }
+    }
+
     /// Get systemd "exposure level" for the service (0-100).
     /// 100 means extremely exposed (no hardening), 0 means so sandboxed it can't do much.
     /// Although this is a very crude heuristic, below 40-50 is generally good.
@@ -169,6 +218,29 @@ impl Service {
         writeln!(fragment_file, "TimeoutStartSec=infinity")?;
         writeln!(fragment_file, "KillMode=control-group")?;
         writeln!(fragment_file, "StandardOutput=journal")?;
+
+        // Modifying Env Path for strace availability if needed
+        let old_path_env = Self::get_exec_path(&config_paths)?;
+        if Self::resolve_exec_path("strace", &old_path_env.clone().into()).is_some() {
+            log::info!("Found strace in previous path, no correction needed");
+        } else {
+            let path_with_strace =
+                Self::resolve_exec_path("strace", &env::var_os("PATH").unwrap()).unwrap();
+            log::info!(
+                "Found strace from local PATH in {}, inserting it into unit config!",
+                path_with_strace.display()
+            );
+            let mut paths = env::split_paths(&old_path_env).collect::<Vec<_>>();
+            paths.push(path_with_strace);
+            let new_path = env::join_paths(paths)?;
+            writeln!(
+                fragment_file,
+                "Environment=\"PATH={}\"",
+                new_path
+                    .to_str()
+                    .expect("Something went wrong file formatting the new PATH")
+            )?;
+        }
 
         // Profile data dir
         let mut rng = rand::rng();
