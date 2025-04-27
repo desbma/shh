@@ -1,12 +1,17 @@
 //! Build script to generate syscall map
 
 #![expect(clippy::unwrap_used)]
+#![cfg_attr(
+any(feature = "gen-man-pages", feature = "gen-shell-compl"),
+expect(dead_code,unused_imports)
+)]
 
 use std::{
     collections::{HashMap, HashSet},
     env, fs,
     io::BufRead as _,
-    path::Path,
+    io::Error,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
@@ -19,7 +24,7 @@ fn is_syscall_line(l: &str) -> bool {
 /// Ignored classes it would make no sense to backlist
 const IGNORED_CLASSES: [&str; 3] = ["default", "known", "system-service"];
 
-fn main() {
+fn generate_syscall_groups() {
     // Run systemd-analyze to get syscall list & groups
     let output = Command::new("systemd-analyze")
         .arg("syscall-filter")
@@ -66,4 +71,54 @@ fn main() {
     let dest_path = Path::new(&out_dir).join("systemd_syscall_groups.rs");
     let const_declarations = const_declaration!(SYSCALL_CLASSES = classes);
     fs::write(&dest_path, const_declarations).unwrap();
+}
+
+#[cfg(any(feature = "gen-man-pages", feature = "gen-shell-compl"))]
+#[path="src/cl.rs"]
+mod cl;
+
+#[cfg(feature = "gen-man-pages")]
+fn generate_manpages(outdir: &Path, app_name: &str) -> std::io::Result<()> {
+    use clap::CommandFactory as _;
+
+    fs::create_dir_all(&outdir).unwrap();
+
+    let app = cl::Args::command().name(app_name.to_string());
+    clap_mangen::generate_to(app, outdir)?;
+    // todo auto compress
+    Ok(())
+}
+
+#[cfg(feature = "gen-shell-compl")]
+fn generate_shell_completion(outdir: &Path, app_name: &str) -> Result<(), Error> {
+    use clap_complete::{generate_to, Shell};
+    use clap::ValueEnum;
+    use clap::CommandFactory as _;
+
+    let mut app = cl::Args::command().name(app_name.to_string());
+
+    fs::create_dir_all(&outdir).unwrap();
+
+    let shells = Shell::value_variants();
+    for shell in shells {
+        generate_to(*shell, &mut app, &*app_name, &outdir)?;
+    }
+
+    Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    generate_syscall_groups();
+
+    let dest_path = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    let assets_path = dest_path.ancestors().nth(4).unwrap().join("assets");
+    let _app_name = "shh"; // it is for some reason really painfull to extract this from the Cargo toml
+
+    #[cfg(feature = "gen-man-pages")]
+    generate_manpages(&assets_path.join("man"), &_app_name)?;
+
+    #[cfg(feature = "gen-shell-compl")]
+    generate_shell_completion(&assets_path.join("shell"), &_app_name)?;
+
+    Ok(())
 }

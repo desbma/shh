@@ -21,13 +21,16 @@ codegen-units = 1
 strip = true
 
 [build-dependencies]
+clap = { version = "4.5.36", default-features = false, features = ["std", "color", "help", "usage", "error-context", "suggestions", "derive", "string"] }
+clap_complete = { version = "4.5.47", default-features = false, optional = true }
+clap_mangen = { version = "0.2.26", default-features = false, optional = true }
 const-gen = { version = "1.6.6", default-features = false, features = ["std", "phf"] }
+strum = { version = "0.27.1", default-features = false, features = ["std", "derive"] }
 
 [dependencies]
 anyhow = { version = "1.0.97", default-features = false, features = ["std", "backtrace"] }
 bincode = { version = "2.0.1", default-features = false, features = ["std", "serde"] }
 clap = { version = "4.5.36", default-features = false, features = ["std", "color", "help", "usage", "error-context", "suggestions", "derive"] }
-clap_mangen = { version = "0.2.26", default-features = false, optional = true }
 function_name = { version = "0.3.0", default-features = false }
 goblin = { version = "0.9.3", default-features = false, features = ["std", "elf32", "elf64", "endian_fd"] }
 itertools = { version = "0.14.0", default-features = false, features = ["use_std"] }
@@ -57,6 +60,7 @@ pretty_assertions = { version = "1.4.1", default-features = false, features = ["
 default = []
 as-root = [] # for tests only
 gen-man-pages = ["dep:clap_mangen"]
+gen-shell-compl = ["dep:clap_complete"]
 nightly = [] # for benchmarks only
 
 [lints.rust]
@@ -128,7 +132,9 @@ verbose_file_reads = "warn"
 [package.metadata.deb]
 name = "shh"
 depends = "$auto, strace"
+features = ["gen-man-pages"]
 assets = [
   ["target/release/shh", "usr/bin/", "755"],
-  ["target/man/*.1.gz", "usr/share/man/man1/", "644"]
+#  ["target/assets/man/*.1.gz", "usr/share/man/man1/", "644"]
+  ["target/assets/man/*.1", "usr/share/man/man1/", "644"] # todo fix this to compress manpages while building
 ]

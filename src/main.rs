@@ -1,10 +1,6 @@
 //! Systemd Hardening Helper
 
 #![cfg_attr(all(feature = "nightly", test), feature(test))]
-#![cfg_attr(
-    feature = "gen-man-pages",
-    expect(dead_code, unused_crate_dependencies, unused_imports)
-)]
 
 use std::{
     env,
@@ -62,20 +58,6 @@ fn edit_file(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "gen-man-pages")]
-fn main() -> anyhow::Result<()> {
-    use clap::CommandFactory as _;
-
-    // Use the binary name instead of the default of the package name
-    let cmd = cl::Args::command().name(env!("CARGO_BIN_NAME"));
-    let output = env::args_os()
-        .nth(1)
-        .ok_or_else(|| anyhow::anyhow!("Missing output dir argument"))?;
-    clap_mangen::generate_to(cmd, output)?;
-    Ok(())
-}
-
-#[cfg(not(feature = "gen-man-pages"))]
 fn main() -> anyhow::Result<()> {
     // Init logger
     simple_logger::SimpleLogger::new()
