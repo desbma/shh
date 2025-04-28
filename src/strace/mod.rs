@@ -7,6 +7,12 @@ mod run;
 
 pub(crate) use run::Strace;
 
+const STRACE_BIN: &str = if let Some(p) = option_env!("SHH_STRACE_BIN_PATH") {
+    p
+} else {
+    "strace"
+};
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Syscall {
     pub pid: u32,
@@ -135,7 +141,7 @@ impl StraceVersion {
     }
 
     pub(crate) fn local_system() -> anyhow::Result<Self> {
-        let output = Command::new("strace").arg("--version").output()?;
+        let output = Command::new(STRACE_BIN).arg("--version").output()?;
         if !output.status.success() {
             anyhow::bail!("strace invocation failed with code {:?}", output.status);
         }

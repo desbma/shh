@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::Context as _;
 
-use crate::strace::parser::LogParser;
+use crate::strace::{STRACE_BIN, parser::LogParser};
 
 pub(crate) struct Strace {
     /// Strace process
@@ -31,7 +31,7 @@ impl Strace {
 
         // Start process
         // TODO setuid/setgid execution will be broken unless strace runs as root
-        let child = Command::new("strace")
+        let child = Command::new(STRACE_BIN)
             .args([
                 "--daemonize=grandchild",
                 "--relative-timestamps",
