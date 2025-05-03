@@ -122,10 +122,20 @@ pub(crate) enum Action {
     /// Dump markdown formatted list of supported systemd options
     ListSystemdOptions,
     /// Generate man pages
-    #[cfg(feature = "gen-man-pages")]
+    #[cfg(feature = "generate-extra")]
     GenManPages {
         /// Target directory (must exist)
         dir: PathBuf,
+    },
+    /// Generate shell completion
+    #[cfg(feature = "generate-extra")]
+    #[group(required = true, multiple = true)]
+    GenShellComplete {
+        /// Shell to generate for, leave empty for all
+        #[arg(short = 's', long, default_value = None)]
+        shell: Option<clap_complete::Shell>,
+        /// Target directory, leave empty to write to standard output
+        dir: Option<PathBuf>,
     },
 }
 

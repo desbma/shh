@@ -38,8 +38,9 @@ jobs:
           toolchain: stable
           target: x86_64-unknown-linux-gnu
       - run: |
-          mkdir -p target/man
-          cargo run --features gen-man-pages -- gen-man-pages target/man
+          mkdir -p target/{man,shellcomplete}
+          cargo run --features generate-extra -- gen-man-pages target/man
+          cargo run --features generate-extra -- gen-shell-complete target/shellcomplete
           gzip -9 target/man/*.1
       - uses: taiki-e/install-action@v2
         with:

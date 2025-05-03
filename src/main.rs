@@ -285,13 +285,36 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        #[cfg(feature = "gen-man-pages")]
+        #[cfg(feature = "generate-extra")]
         cl::Action::GenManPages { dir } => {
             use clap::CommandFactory as _;
 
             // Use the binary name instead of the default of the package name
             let cmd = cl::Args::command().name(env!("CARGO_BIN_NAME"));
             clap_mangen::generate_to(cmd, &dir)?;
+        }
+        #[cfg(feature = "generate-extra")]
+        cl::Action::GenShellComplete { shell, dir } => {
+            use clap::CommandFactory as _;
+            use clap::ValueEnum as _;
+            use clap_complete::{Shell, generate, generate_to};
+
+            // Use the binary name instead of the default of the package name
+            let name = env!("CARGO_BIN_NAME");
+            let mut cmd = cl::Args::command().name(name);
+
+            if let Some(shell) = shell {
+                if let Some(dir) = dir {
+                    generate_to(shell, &mut cmd, name, dir)?;
+                } else {
+                    generate(shell, &mut cmd, name, &mut io::stdout());
+                }
+            } else if let Some(dir) = dir {
+                let shells = Shell::value_variants();
+                for shell_i in shells {
+                    generate_to(*shell_i, &mut cmd, name, &dir)?;
+                }
+            }
         }
     }
 

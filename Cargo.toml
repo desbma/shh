@@ -27,6 +27,7 @@ const-gen = { version = "1.6.6", default-features = false, features = ["std", "p
 anyhow = { version = "1.0.97", default-features = false, features = ["std", "backtrace"] }
 bincode = { version = "2.0.1", default-features = false, features = ["std", "serde"] }
 clap = { version = "4.5.36", default-features = false, features = ["std", "color", "help", "usage", "error-context", "suggestions", "derive"] }
+clap_complete = { version = "4.5.48", default-features = false, optional = true }
 clap_mangen = { version = "0.2.26", default-features = false, optional = true }
 function_name = { version = "0.3.0", default-features = false }
 goblin = { version = "0.9.3", default-features = false, features = ["std", "elf32", "elf64", "endian_fd"] }
@@ -56,7 +57,7 @@ pretty_assertions = { version = "1.4.1", default-features = false, features = ["
 [features]
 default = []
 as-root = [] # for tests only
-gen-man-pages = ["dep:clap_mangen"]
+generate-extra = ["dep:clap_mangen", "dep:clap_complete"]
 nightly = [] # for benchmarks only
 
 [lints.rust]
@@ -130,5 +131,8 @@ name = "shh"
 depends = "$auto, strace"
 assets = [
   ["target/release/shh", "usr/bin/", "755"],
-  ["target/man/*.1.gz", "usr/share/man/man1/", "644"]
+  ["target/man/*.1.gz", "usr/share/man/man1/", "644"],
+  ["target/shellcomplete/*.bash", "/usr/share/bash-completion/completions/", "644"],
+  ["target/shellcomplete/*.fish", "/usr/share/fish/vendor_completions.d/", "644"],
+  ["target/shellcomplete/_shh", "/usr/share/zsh/vendor-completions/", "644"]
 ]
