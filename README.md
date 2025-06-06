@@ -3,6 +3,7 @@
 [![CI status](https://github.com/desbma/shh/actions/workflows/ci.yml/badge.svg)](https://github.com/desbma/shh/actions)
 [![crates.io version](https://img.shields.io/crates/v/systemd-hardening-helper)](https://crates.io/crates/systemd-hardening-helper)
 [![AUR version](https://img.shields.io/aur/version/shh.svg?style=flat)](https://aur.archlinux.org/packages/shh/)
+[![nixpkgs unstable version](https://repology.org/badge/version-for-repo/nix_unstable/shh.svg?header=nixpkgs+unstable)](https://search.nixos.org/packages?channel=unstable&show=shh&size=1&sort=relevance&type=packages&query=shh)
 [![License](https://img.shields.io/github/license/desbma/shh.svg?style=flat)](https://github.com/desbma/shh/blob/master/LICENSE)
 
 Automatic [systemd](https://systemd.io/) service hardening guided by [strace](https://strace.io/) profiling.
@@ -32,6 +33,21 @@ Run in the current repository:
 cargo build --release
 install -Dm 755 -t /usr/local/bin target/release/shh
 ```
+Additionally if you want to build and install the manpages and shell-completions
+```
+mkdir -p target/{man,shellcomplete}
+
+# for man pages
+cargo run --features generate-extra -- gen-man-pages target/man
+gzip -9 target/man/*.1
+install -Dm 644 -t usr/share/man/man1/ target/man/*.1.gz
+
+# for shell completion
+cargo run --features generate-extra -- gen-shell-complete target/shellcomplete
+install -Dm 644 -t /usr/share/bash-completion/completions/ target/shellcomplete/*.bash
+install -Dm 644 -t /usr/share/fish/vendor_completions.d/ target/shellcomplete/*.fish
+install -Dm 644 -t /usr/share/zsh/vendor-completions/ target/shellcomplete/_shh
+```
 
 ### From [`crates.io`](https://crates.io/)
 
@@ -46,6 +62,10 @@ See [GitHub releases](https://github.com/desbma/shh/releases) for Debian package
 ### Arch Linux
 
 Arch Linux users can install the [shh AUR package](https://aur.archlinux.org/packages/shh).
+
+### Nixpkgs
+
+Nixos/Nix users can install the latest package from the [unstable branch](https://search.nixos.org/packages?channel=unstable&show=shh&size=1&sort=relevance&type=packages&query=shh). 
 
 ## Usage
 
