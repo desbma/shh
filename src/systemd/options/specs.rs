@@ -1341,7 +1341,7 @@ impl OptionSpec for CapabilityBoundingSet {
     fn build(&self, _ctx: &OptionContext<'_>) -> OptionDescription {
         // Note: we don't want to duplicate the kernel permission checking logic here, which would be
         // a maintenance nightmare, so in most case we over (never under!) simplify the capability's effect
-        // or we don't implement it at all if too complex because the risk of breakage is too highstruct CapabilityBoundingSetSpec;
+        // or we don't implement it at all if too complex because the risk of breakage is too high
         let cap_effects = [
             // CAP_AUDIT_CONTROL, CAP_AUDIT_READ, CAP_AUDIT_WRITE: requires netlink socket message handling
             (
