@@ -15,7 +15,7 @@ jobs:
   changelog-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -23,7 +23,7 @@ jobs:
         with:
           tool: git-cliff
       - run: git cliff -o CHANGELOG_${{ github.ref_name }}.md $(git tag -l | sort -V | tail -n -2 | head -n -1)..HEAD
-      - uses: softprops/action-gh-release@v1
+      - uses: softprops/action-gh-release@v2
         with:
           body_path: CHANGELOG_${{ github.ref_name }}.md
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -31,7 +31,7 @@ jobs:
   deb-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -48,7 +48,7 @@ jobs:
       - run: cargo deb --target x86_64-unknown-linux-gnu
         env:
           RUSTFLAGS: "-C target-feature=+crt-static"
-      - uses: softprops/action-gh-release@v1
+      - uses: softprops/action-gh-release@v2
         with:
           files: target/x86_64-unknown-linux-gnu/debian/shh_*.deb
           token: ${{ secrets.GITHUB_TOKEN }}
