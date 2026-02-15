@@ -153,15 +153,15 @@ pub(crate) enum Action {
     /// Dump markdown formatted list of supported systemd options
     ListSystemdOptions,
     /// Generate man pages
-    #[cfg(feature = "generate-extra")]
+    #[cfg(feature = "generate-extras")]
     GenManPages {
         /// Target directory (must exist)
         dir: PathBuf,
     },
     /// Generate shell completion
-    #[cfg(feature = "generate-extra")]
-    #[group(required = true, multiple = true)]
-    GenShellComplete {
+    #[cfg(feature = "generate-extras")]
+    #[group(required = true, multiple = false)]
+    GenShellCompletions {
         /// Shell to generate for, leave empty for all
         #[arg(short = 's', long, default_value = None)]
         shell: Option<clap_complete::Shell>,
@@ -219,4 +219,56 @@ pub(crate) enum ServiceAction {
         #[command(flatten)]
         service: Service,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory as _;
+
+    use super::*;
+
+    #[cfg(feature = "generate-extras")]
+    #[test]
+    fn gen_shell_completions_single_shell() {
+        let result = Args::try_parse_from([
+            env!("CARGO_BIN_NAME"),
+            "gen-shell-completions",
+            "-s",
+            "bash",
+        ]);
+        assert!(result.is_ok());
+    }
+
+    #[cfg(feature = "generate-extras")]
+    #[test]
+    fn gen_shell_completions_all_in_dir() {
+        let result =
+            Args::try_parse_from([env!("CARGO_BIN_NAME"), "gen-shell-completions", "/tmp"]);
+        assert!(result.is_ok());
+    }
+
+    #[cfg(feature = "generate-extras")]
+    #[test]
+    fn gen_shell_completions_rejects_shell_and_dir() {
+        let result = Args::try_parse_from([
+            env!("CARGO_BIN_NAME"),
+            "gen-shell-completions",
+            "-s",
+            "bash",
+            "/tmp",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[cfg(feature = "generate-extras")]
+    #[test]
+    fn gen_shell_completions_rejects_no_args() {
+        let result = Args::try_parse_from([env!("CARGO_BIN_NAME"), "gen-shell-complete"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn verify_cli() {
+        Args::command().debug_assert();
+    }
 }

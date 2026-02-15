@@ -59,7 +59,7 @@ ron = { version = "0.12.0", default-features = false, features = ["std", "intege
 
 [features]
 default = []
-generate-extra = ["dep:clap_mangen", "dep:clap_complete"]
+generate-extras = ["dep:clap_complete", "dep:clap_mangen"]
 int-tests-as-root = [] # for integration tests only
 int-tests-gimp = [] # for integration tests only
 int-tests-sd-user = [] # for integration tests only
