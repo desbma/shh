@@ -6,12 +6,16 @@ mod tests {
     use std::{
         env, fs,
         process::Command,
-        sync::LazyLock,
+        sync::{LazyLock, Mutex, PoisonError},
         thread,
         time::{Duration, Instant},
     };
 
     static ALL_SHH_RUN_OPTS: LazyLock<Vec<Vec<&'static str>>> = LazyLock::new(all_shh_run_opts);
+
+    /// Serializes tests profiling the `weborf@` template: they share the same template-level
+    /// drop-in fragment path, so they cannot run concurrently
+    static WEBORF_TEMPLATE_LOCK: Mutex<()> = Mutex::new(());
 
     const WAIT_ACTIVE_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -181,8 +185,12 @@ mod tests {
 
     /// Set up a weborf instance config and document root for testing
     fn setup_weborf_instance(instance: &str, port: u16) {
-        let docroot = format!("/srv/www/{instance}");
-        fs::create_dir_all(&docroot).unwrap();
+        setup_weborf_instance_at(instance, port, &format!("/srv/www/{instance}"));
+    }
+
+    /// Set up a weborf instance serving an arbitrary document root
+    fn setup_weborf_instance_at(instance: &str, port: u16, docroot: &str) {
+        fs::create_dir_all(docroot).unwrap();
         fs::write(
             format!("{docroot}/index.html"),
             "<html><body>shh-test</body></html>\n",
@@ -198,40 +206,140 @@ mod tests {
 
     /// Remove a weborf instance config and document root
     fn teardown_weborf_instance(instance: &str) {
+        teardown_weborf_instance_at(instance, &format!("/srv/www/{instance}"));
+    }
+
+    fn teardown_weborf_instance_at(instance: &str, docroot: &str) {
         let _ = fs::remove_file(format!("/etc/weborf.d/{instance}"));
-        let _ = fs::remove_dir_all(format!("/srv/www/{instance}"));
+        let _ = fs::remove_dir_all(docroot);
+    }
+
+    /// Check a weborf instance serves its document root, waiting for it to accept connections
+    fn check_weborf(port: u16) {
+        let url = format!("http://127.0.0.1:{port}/");
+        let start = Instant::now();
+        let response = loop {
+            match ureq::get(&url).call() {
+                Ok(response) => break response,
+                Err(ureq::Error::Io(e))
+                    if e.kind() == std::io::ErrorKind::ConnectionRefused
+                        && start.elapsed() < WAIT_ACTIVE_TIMEOUT =>
+                {
+                    eprintln!("Waiting for weborf to accept connections: {e}");
+                    thread::sleep(Duration::from_millis(500));
+                }
+                Err(e) => panic!("weborf not reachable after {:?}: {e}", start.elapsed()),
+            }
+        };
+        assert_eq!(response.status().as_u16(), 200);
+        let html = response.into_body().read_to_string().unwrap();
+        assert!(html.contains("shh-test"));
     }
 
     #[test]
     fn harden_weborf() {
+        let _lock = WEBORF_TEMPLATE_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let instance = "shhtest";
         let port = 8888_u16;
 
         setup_weborf_instance(instance, port);
 
-        let checker = || {
-            let url = format!("http://127.0.0.1:{port}/");
-            let start = Instant::now();
-            let response = loop {
-                match ureq::get(&url).call() {
-                    Ok(response) => break response,
-                    Err(ureq::Error::Io(e))
-                        if e.kind() == std::io::ErrorKind::ConnectionRefused
-                            && start.elapsed() < WAIT_ACTIVE_TIMEOUT =>
-                    {
-                        eprintln!("Waiting for weborf to accept connections: {e}");
-                        thread::sleep(Duration::from_millis(500));
-                    }
-                    Err(e) => panic!("weborf not reachable after {:?}: {e}", start.elapsed()),
-                }
-            };
-            assert_eq!(response.status().as_u16(), 200);
-            let html = response.into_body().read_to_string().unwrap();
-            assert!(html.contains("shh-test"));
-        };
-
-        harden_service(&format!("weborf@{instance}"), checker);
+        harden_service(&format!("weborf@{instance}"), || check_weborf(port));
 
         teardown_weborf_instance(instance);
+    }
+
+    /// Run a shh subcommand, dumping the units logs on failure
+    fn run_shh(args: &[&str], units: &[&str]) {
+        let status = Command::new(shh_bin()).args(args).status().unwrap();
+        if !status.success() {
+            for unit in units {
+                service_log(unit);
+            }
+        }
+        assert!(status.success(), "shh {} failed", args.join(" "));
+    }
+
+    fn start_unit(unit: &str) {
+        let status = Command::new("systemctl")
+            .args(["start", unit])
+            .status()
+            .unwrap();
+        if !status.success() {
+            service_log(unit);
+        }
+        assert!(status.success());
+    }
+
+    /// Profile two instances of the same template that access different document roots, and verify
+    /// the merged profile produces hardening that keeps *both* working.
+    ///
+    /// The two document roots live under distinct top level directories (`/srv` and `/opt`), so a
+    /// profile of a single instance would whitelist only its own root and break the other one:
+    /// only merging both profiles before resolution yields options compatible with both.
+    #[test]
+    fn harden_weborf_multiple_instances() {
+        let _lock = WEBORF_TEMPLATE_LOCK
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let inst_a = "shhmulta";
+        let inst_b = "shhmultb";
+        let port_a = 8889_u16;
+        let port_b = 8890_u16;
+        let docroot_a = format!("/srv/www/{inst_a}");
+        let docroot_b = format!("/opt/{inst_b}");
+        let unit_a = format!("weborf@{inst_a}");
+        let unit_b = format!("weborf@{inst_b}");
+
+        setup_weborf_instance_at(inst_a, port_a, &docroot_a);
+        setup_weborf_instance_at(inst_b, port_b, &docroot_b);
+
+        let frag_dir = fragment_dir(&unit_a);
+        let hardening_fragment_path = format!("/etc/systemd/system/{frag_dir}/zz_shh-harden.conf");
+        let profiling_fragment_path = format!("/run/systemd/system/{frag_dir}/zz_shh-profile.conf");
+        let units = [unit_a.as_str(), unit_b.as_str()];
+
+        // Start both instances and check they serve before hardening
+        start_unit(&unit_a);
+        start_unit(&unit_b);
+        check_weborf(port_a);
+        check_weborf(port_b);
+
+        // Profile both instances together with filesystem whitelisting, so their divergent
+        // document root accesses must both be reflected in the resolved options
+        run_shh(
+            &["service", "start-profile", &unit_a, &unit_b, "-w"],
+            &units,
+        );
+        wait_active(&unit_a);
+        wait_active(&unit_b);
+        eprintln!("{}", fs::read_to_string(&profiling_fragment_path).unwrap());
+
+        // Exercise both instances while profiled
+        check_weborf(port_a);
+        check_weborf(port_b);
+
+        // Merge the profiles and apply the hardening fragment
+        run_shh(
+            &["service", "finish-profile", &unit_a, &unit_b, "-a"],
+            &units,
+        );
+        assert!(!fs::exists(&profiling_fragment_path).unwrap());
+        let hardening_fragment = fs::read_to_string(&hardening_fragment_path).unwrap();
+        eprintln!("{hardening_fragment}");
+        wait_active(&unit_a);
+        wait_active(&unit_b);
+
+        // Both instances must still serve their document root under the merged hardening
+        check_weborf(port_a);
+        check_weborf(port_b);
+
+        run_shh(&["service", "reset", &unit_a, &unit_b], &units);
+        assert!(!fs::exists(&hardening_fragment_path).unwrap());
+
+        teardown_weborf_instance_at(inst_a, &docroot_a);
+        teardown_weborf_instance_at(inst_b, &docroot_b);
     }
 }

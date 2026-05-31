@@ -172,10 +172,25 @@ pub(crate) enum Action {
 
 #[derive(Debug, clap::Parser)]
 pub(crate) struct Service {
-    /// Service unit name
-    pub name: String,
+    /// Service unit name(s).
+    /// Several instances of the same template may be passed (e.g. "foo@a" "foo@b") to profile and
+    /// harden them together
+    #[arg(required = true, num_args = 1..)]
+    pub units: Vec<String>,
     #[command(flatten)]
     pub instance: ServiceInstance,
+}
+
+/// Profiling parameters persisted in the profiling fragment, recovered by `finish-profile`
+/// so they do not need to be passed again
+#[derive(Debug, clap::Parser)]
+#[command(no_binary_name = true)]
+pub(crate) struct ProfilingParams {
+    /// Assume the systemd .service unit has been generated from a .container template
+    #[arg(short, long, default_value_t)]
+    pub container: bool,
+    #[command(flatten)]
+    pub hardening_opts: HardeningOptions,
 }
 
 #[derive(Debug, clap::Parser)]

@@ -140,18 +140,6 @@ pub(crate) struct ListOptionValue {
     pub mergeable_paths: bool,
 }
 
-impl FromStr for OptionValue {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "true" => Ok(OptionValue::Boolean(true)),
-            "false" => Ok(OptionValue::Boolean(false)),
-            _ => Ok(OptionValue::String(s.to_owned())),
-        }
-    }
-}
-
 /// A systemd option value and its effects
 #[derive(Debug)]
 pub(crate) struct OptionValueDescription {
@@ -498,22 +486,6 @@ impl<T: PartialEq> OptionWithValue<T> {
         } else {
             false
         }
-    }
-}
-
-impl FromStr for OptionWithValue<String> {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (name, value) = s
-            .split_once('=')
-            .ok_or_else(|| anyhow::anyhow!("Missing '=' char in {s:?}"))?;
-
-        Ok(Self {
-            name: name.to_owned(),
-            #[expect(clippy::unwrap_used)] // never fails
-            value: value.parse().unwrap(),
-        })
     }
 }
 

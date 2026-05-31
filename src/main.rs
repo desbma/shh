@@ -6,7 +6,7 @@ use std::{
     env,
     fs::{self, File},
     io,
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     sync::Arc,
     thread::{self, sleep},
@@ -50,6 +50,18 @@ fn sd_options(
             .join(", ")
     );
     sd_opts
+}
+
+fn load_profile_data(paths: &[PathBuf]) -> anyhow::Result<Vec<summarize::ProgramAction>> {
+    let mut actions = Vec::new();
+    for path in paths {
+        let profile_data = fs::read(path).with_context(|| format!("Failed to read {path:?}"))?;
+        let (mut profile_actions, _): (Vec<summarize::ProgramAction>, _) =
+            postcard::take_from_bytes(&profile_data)
+                .with_context(|| format!("Failed to deserialize profile from {path:?}"))?;
+        actions.append(&mut profile_actions);
+    }
+    Ok(actions)
 }
 
 fn edit_file(path: &Path) -> anyhow::Result<()> {
@@ -211,15 +223,7 @@ fn main() -> anyhow::Result<()> {
             );
 
             // Load and merge profile data
-            let mut actions: Vec<summarize::ProgramAction> = Vec::new();
-            for path in &paths {
-                let profile_data =
-                    fs::read(path).with_context(|| format!("Failed to read {path:?}"))?;
-                let (mut profile_actions, _): (Vec<summarize::ProgramAction>, _) =
-                    postcard::take_from_bytes(&profile_data)
-                        .with_context(|| format!("Failed to deserialize profile from {path:?}"))?;
-                actions.append(&mut profile_actions);
-            }
+            let actions = load_profile_data(&paths)?;
             log::debug!("{actions:?}");
 
             // Resolve
@@ -244,14 +248,16 @@ fn main() -> anyhow::Result<()> {
                 .validate()
                 .context("Invalid command line options")?;
 
-            let service = systemd::Service::new(&service.name, service.instance.instance)
+            let service = systemd::Service::new(&service.units, service.instance.instance)
                 .context("Invalid service name")?;
-            log::info!(
-                "Current service exposure level: {}",
-                service
-                    .get_exposure_level()
-                    .context("Failed to get exposure level")?
-            );
+            for unit_name in service.unit_names() {
+                log::info!(
+                    "Current exposure level of {unit_name}: {}",
+                    service
+                        .get_exposure_level(&unit_name)
+                        .context("Failed to get exposure level")?
+                );
+            }
             if refresh {
                 let moved = service
                     .rename_hardening_fragment()
@@ -284,20 +290,44 @@ fn main() -> anyhow::Result<()> {
             edit,
             no_restart,
         }) => {
-            let service = systemd::Service::new(&service.name, service.instance.instance)
+            let service = systemd::Service::new(&service.units, service.instance.instance)
                 .context("Invalid service name")?;
-            let cursor = systemd::JournalCursor::current()?;
-            // Capture invocation ID before stop, as systemd may clear it for template instances
-            let invocation = service
-                .invocation_id()
-                .context("Failed to get invocation id (is the service running?)")?;
+
+            // Recover the hardening parameters captured at start-profile time
+            let fragment = service
+                .read_profiling_fragment()
+                .context("Failed to read profiling fragment (is profiling started?)")?;
+            let persisted = systemd::Service::persisted_profiling_args(&fragment)?;
+            let params = cl::ProfilingParams::try_parse_from(persisted)
+                .context("Failed to parse persisted profiling parameters")?;
+
+            // Stop all instances so they flush their profile data, then merge it
             service
                 .action("stop", true)
                 .context("Failed to stop service")?;
+            let data_paths = service
+                .profile_data_paths(&fragment)
+                .context("Failed to locate profile data")?;
+            let actions = load_profile_data(&data_paths)?;
+            log::debug!("{actions:?}");
             service
                 .remove_profile_fragment()
                 .context("Failed to remove systemd unit profiling fragment")?;
-            let resolved_opts = service.profiling_result_retry(&cursor, &invocation)?;
+            service
+                .remove_profile_data(&fragment)
+                .context("Failed to remove profile data")?;
+
+            // Build supported systemd options and resolve against the merged profile
+            let sysctl_state = sysctl::State::fetch()?;
+            let sd_opts = sd_options(
+                &sd_version,
+                &kernel_version,
+                &sysctl_state,
+                &service.instance,
+                params.container,
+                &params.hardening_opts,
+            );
+            let resolved_opts = systemd::resolve(&sd_opts, &actions, &params.hardening_opts);
             log::info!(
                 "Resolved systemd options:\n{}",
                 resolved_opts
@@ -320,12 +350,14 @@ fn main() -> anyhow::Result<()> {
                 .reload_unit_config()
                 .context("Failed to reload systemd config")?;
             if apply {
-                log::info!(
-                    "New service exposure level: {}",
-                    service
-                        .get_exposure_level()
-                        .context("Failed to get exposure level")?
-                );
+                for unit_name in service.unit_names() {
+                    log::info!(
+                        "New exposure level of {unit_name}: {}",
+                        service
+                            .get_exposure_level(&unit_name)
+                            .context("Failed to get exposure level")?
+                    );
+                }
             }
             service
                 .reset_failed()
@@ -337,7 +369,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         cl::Action::Service(cl::ServiceAction::Reset { service }) => {
-            let service = systemd::Service::new(&service.name, service.instance.instance)?;
+            let service = systemd::Service::new(&service.units, service.instance.instance)?;
             let _ = service.remove_profile_fragment();
             let _ = service.remove_hardening_fragment();
             service

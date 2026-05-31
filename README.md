@@ -64,6 +64,8 @@ To harden a system unit named `SERVICE.service`:
 2. Use the service normally for a while, trying to cover as much features and use cases as possible.
 3. Run `shh service finish-profile SERVICE -a`. The service will be restarted with a hardened configuration built from previous runtime profiling, to allow it to run safely as was observed during the profiling period, and to deny other dangerous system actions.
 
+To harden a templated unit whose hardening is shared by all its instances, several instances can be profiled together by passing them all to both commands, e.g. `shh service start-profile foo@a foo@b` then `shh service finish-profile foo@a foo@b -a`. Their profiles are merged before resolving options, so the generated hardening is compatible with all of them.
+
 Run `shh -h` for full command line reference, or append `-h` to a subcommand to get help.
 
 > [!WARNING]
