@@ -25,42 +25,42 @@ strip = true
 const-gen = { version = "1.6.9", default-features = false, features = ["std", "phf"] }
 
 [dependencies]
-anyhow = { version = "1.0.102", default-features = false, features = ["std", "backtrace"] }
+anyhow = { version = "1.0.103", default-features = false, features = ["std", "backtrace"] }
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
-chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.6.1", default-features = false, features = ["std", "color", "help", "usage", "error-context", "suggestions", "derive"] }
-clap_complete = { version = "4.6.2", default-features = false, optional = true }
-clap_mangen = { version = "0.2.33", default-features = false, optional = true }
+clap_complete = { version = "4.6.7", default-features = false, optional = true }
+clap_mangen = { version = "0.3.0", default-features = false, optional = true }
 function_name = { version = "0.3.0", default-features = false }
-goblin = { version = "0.10.5", default-features = false, features = ["std", "elf32", "elf64", "endian_fd"] }
-itertools = { version = "0.14.0", default-features = false, features = ["use_std"] }
-log = { version = "0.4.29", default-features = false, features = ["max_level_trace", "release_max_level_debug"] }
-nix = { version = "0.31.2", default-features = false, features = ["fs", "user", "process", "signal"] }
+goblin = { version = "0.10.7", default-features = false, features = ["std", "elf32", "elf64", "endian_fd"] }
+itertools = { version = "0.15.0", default-features = false, features = ["use_std"] }
+log = { version = "0.4.33", default-features = false, features = ["max_level_trace", "release_max_level_debug"] }
+nix = { version = "0.31.3", default-features = false, features = ["fs", "user", "process", "signal"] }
 nom = { version = "8.0.0", default-features = false, features = ["std"] }
 path-clean = { version = "1.0.1", default-features = false }
-phf = { version = "0.13.1", default-features = false, features = ["std", "macros"] }
-rand = { version = "0.10.1", default-features = false, features = ["std", "thread_rng"] }
-regex = { version = "1.12.3", default-features = false, features = ["std", "perf"] }
+phf = { version = "0.14.0", default-features = false, features = ["std", "macros"] }
+rand = { version = "0.10.2", default-features = false, features = ["std", "thread_rng"] }
+regex = { version = "1.12.4", default-features = false, features = ["std", "perf"] }
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
-shlex = { version = "1.3.0", default-features = false, features = ["std"] }
+shlex = { version = "2.0.1", default-features = false, features = ["std"] }
 signal-hook = { version = "0.4.4", default-features = false, features = ["iterator"] }
 simple_logger = { version = "5.2.0", default-features = false, features = ["colors", "stderr"] }
 strum = { version = "0.28.0", default-features = false, features = ["std", "derive"] }
 tempfile = { version = "3.27.0", default-features = false }
 thiserror = { version = "2.0.18", default-features = false, features = ["std"] }
-ecow = { version = "0.2.6", default-features = false, features = ["serde", "std"] }
+ecow = { version = "0.3.0", default-features = false, features = ["serde", "std"] }
 systemd-duration = { version = "0.3.1", default-features = false }
 
 [dev-dependencies]
-assert_cmd = { version = "2.2.0", default-features = false, features = ["color", "color-auto"] }
-compact_str = { version = "0.9.0", default-features = false }
+assert_cmd = { version = "2.2.2", default-features = false, features = ["color", "color-auto"] }
+compact_str = { version = "0.9.1", default-features = false }
 fastrand = { version = "2.4.1", default-features = false, features = ["std"] }
-insta = { version = "1.47.2", default-features = false, features = ["colors", "ron"] }
-nix = { version = "0.31.2", default-features = false, features = ["user"] }
+insta = { version = "1.48.0", default-features = false, features = ["colors", "ron"] }
+nix = { version = "0.31.3", default-features = false, features = ["user"] }
 predicates = { version = "3.1.4", default-features = false, features = ["color", "regex"] }
 pretty_assertions = { version = "1.4.1", default-features = false, features = ["std"] }
 smol_str = { version = "0.3.2", default-features = false }
-ron = { version = "0.12.1", default-features = false, features = ["std"] }
+ron = { version = "0.12.2", default-features = false, features = ["std"] }
 ureq = { version = "3.3.0", default-features = false }
 
 [features]
