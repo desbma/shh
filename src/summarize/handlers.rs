@@ -848,7 +848,7 @@ impl SyscallHandler for OpenHandler {
             || flags_val.is_flag_set("O_RDWR")
             || flags_val.is_flag_set("O_TRUNC"))
             // char devices can be written to, even if filesystem is mounted read only
-            && !path.metadata().ok().is_some_and(|m| m.file_type().is_char_device())
+            && !path.metadata().is_ok_and(|m| m.file_type().is_char_device())
             {
                 actions.push(ProgramAction::Write(path.clone()));
             }

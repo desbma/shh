@@ -121,7 +121,7 @@ impl Service {
     pub(crate) fn unit_name(&self) -> String {
         format!(
             "{}{}.service",
-            &self.name,
+            self.name,
             if let Some(arg) = self.arg.as_ref() {
                 format!("@{arg}")
             } else {

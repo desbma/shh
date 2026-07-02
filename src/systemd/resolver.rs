@@ -593,6 +593,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::cognitive_complexity)]
     fn resolve_inaccessible_paths() {
         let _ = simple_logger::SimpleLogger::new().init();
 
