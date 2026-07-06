@@ -3,7 +3,7 @@
 [![CI status](https://github.com/desbma/shh/actions/workflows/ci.yml/badge.svg)](https://github.com/desbma/shh/actions)
 [![crates.io version](https://img.shields.io/crates/v/systemd-hardening-helper)](https://crates.io/crates/systemd-hardening-helper)
 [![AUR version](https://img.shields.io/aur/version/shh.svg?style=flat)](https://aur.archlinux.org/packages/shh/)
-[![nixpkgs unstable version](https://repology.org/badge/version-for-repo/nix_unstable/shh.svg?header=nixpkgs+unstable)](https://search.nixos.org/packages?channel=unstable&show=shh&size=1&sort=relevance&type=packages&query=shh)
+[![nixpkgs unstable version](https://repology.org/badge/version-for-repo/nix_unstable/shh.svg?header=nixpkgs+unstable)](https://search.nixos.org/packages?channel=unstable&show=shh&query=shh)
 [![License](https://img.shields.io/github/license/desbma/shh.svg?style=flat)](https://github.com/desbma/shh/blob/master/LICENSE)
 
 Automatic [systemd](https://systemd.io/) service hardening guided by [strace](https://strace.io/) profiling.
@@ -52,7 +52,7 @@ Arch Linux users can install the [shh AUR package](https://aur.archlinux.org/pac
 
 ### Nixpkgs
 
-Nixos/Nix users can install the latest package from the [unstable branch](https://search.nixos.org/packages?channel=unstable&show=shh&size=1&sort=relevance&type=packages&query=shh).
+Nixos/Nix users can install the latest package from the [unstable branch](https://search.nixos.org/packages?channel=unstable&show=shh&query=shh).
 
 ## Usage
 
