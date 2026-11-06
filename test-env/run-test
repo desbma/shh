@@ -42,6 +42,8 @@ ENV_ARGS+=(--setenv "CARGO_BIN_EXE_shh=/src/target/${PROFILE_DIR}/shh")
 # so it doesn't try to run cargo metadata with the baked-in host path
 ENV_ARGS+=(--setenv "INSTA_WORKSPACE_ROOT=/src")
 ENV_ARGS+=(--setenv "TEST_USER=testuser")
+# Keep Python from refreshing stale stdlib bytecode under /usr, which would vary profiling results
+ENV_ARGS+=(--setenv "PYTHONDONTWRITEBYTECODE=1")
 
 for var in "${PASSTHROUGH_VARS[@]}"; do
     if [ -n "${!var+set}" ]; then
