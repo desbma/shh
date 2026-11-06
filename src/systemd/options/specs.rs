@@ -1411,43 +1411,32 @@ impl OptionSpec for CapabilityBoundingSet {
             // CAP_NET_BROADCAST: unused
             (
                 "CAP_NET_RAW",
-                OptionValueEffect::Multiple(
-                    iter::once(OptionValueEffect::DenyAction(
-                        DeniableAction::NetworkActivity(
-                            NetworkActivity {
-                                af: SetSpecifier::One(SocketFamily::Other("AF_PACKET".into())),
-                                proto: SetSpecifier::All,
-                                kind: SetSpecifier::All,
-                                local_port: SetSpecifier::All,
-                                address: SetSpecifier::All,
-                            }
-                            .into(),
-                        ),
-                    ))
-                    .chain(
-                        ADDRESS_FAMILIES
-                            .iter()
+                OptionValueEffect::Multiple(vec![
+                    OptionValueEffect::DenyAction(DeniableAction::NetworkActivity(
+                        NetworkActivity {
+                            af: SetSpecifier::One(SocketFamily::Other("AF_PACKET".into())),
+                            proto: SetSpecifier::All,
+                            kind: SetSpecifier::All,
+                            local_port: SetSpecifier::All,
+                            address: SetSpecifier::All,
+                        }
+                        .into(),
+                    )),
+                    OptionValueEffect::DenyAction(DeniableAction::NetworkActivity(
+                        NetworkActivity {
                             // AF_NETLINK sockets use SOCK_RAW, but does not require CAP_NET_RAW
-                            .filter(|af| **af != "AF_NETLINK")
-                            .map(|af| {
-                                OptionValueEffect::DenyAction(DeniableAction::NetworkActivity(
-                                    NetworkActivity {
-                                        #[expect(clippy::unwrap_used)]
-                                        af: SetSpecifier::One(af.parse().unwrap()),
-                                        proto: SetSpecifier::One(SocketProtocol::Other(
-                                            "SOCK_RAW".into(),
-                                        )),
-                                        kind: SetSpecifier::All,
-                                        local_port: SetSpecifier::All,
-                                        address: SetSpecifier::All,
-                                    }
-                                    .into(),
-                                ))
-                            }),
-                    )
-                    .collect(),
+                            af: SetSpecifier::AllExcept(vec![SocketFamily::Other(
+                                "AF_NETLINK".into(),
+                            )]),
+                            proto: SetSpecifier::One(SocketProtocol::Other("SOCK_RAW".into())),
+                            kind: SetSpecifier::All,
+                            local_port: SetSpecifier::All,
+                            address: SetSpecifier::All,
+                        }
+                        .into(),
+                    )),
                     // TODO non local bind
-                ),
+                ]),
             ),
             (
                 "CAP_PERFMON",
@@ -1614,52 +1603,8 @@ impl OptionSpec for SystemCallFilter {
 // Some options implicitly force NoNewPrivileges=true which has some effects in itself,
 // which we need to model
 
-/// Address families for `RestrictAddressFamilies` and `CapabilityBoundingSet`
-const ADDRESS_FAMILIES: &[&str] = &[
-    // curl https://man7.org/linux/man-pages/man7/address_families.7.html | grep -o 'AF_[A-Za-z0-9]*' | sort -u | xargs -I'{}' echo \"'{}'\",
-    "AF_ALG",
-    "AF_APPLETALK",
-    "AF_ATMPVC",
-    "AF_ATMSVC",
-    "AF_AX25",
-    "AF_BLUETOOTH",
-    "AF_BRIDGE",
-    "AF_CAIF",
-    "AF_CAN",
-    "AF_DECnet",
-    "AF_ECONET",
-    "AF_IB",
-    "AF_IEEE802154",
-    "AF_INET",
-    "AF_INET6",
-    "AF_IPX",
-    "AF_IRDA",
-    "AF_ISDN",
-    "AF_IUCV",
-    "AF_KCM",
-    "AF_KEY",
-    "AF_LLC",
-    "AF_LOCAL",
-    "AF_MPLS",
-    "AF_NETBEUI",
-    "AF_NETLINK",
-    "AF_NETROM",
-    "AF_PACKET",
-    "AF_PHONET",
-    "AF_PPPOX",
-    "AF_QIPCRTR",
-    "AF_RDS",
-    "AF_ROSE",
-    "AF_RXRPC",
-    "AF_SECURITY",
-    "AF_SMC",
-    "AF_TIPC",
-    "AF_UNIX",
-    "AF_VSOCK",
-    "AF_WANPIPE",
-    "AF_X25",
-    "AF_XDP",
-];
+// Address families for `RestrictAddressFamilies` and `CapabilityBoundingSet`, generated at build time
+include!(concat!(env!("OUT_DIR"), "/address_families.rs"));
 
 /// Static registry of option specifications with their enable conditions
 pub(crate) static OPTION_SPECS: &[&dyn OptionSpec] = &[
@@ -1689,3 +1634,13 @@ pub(crate) static OPTION_SPECS: &[&dyn OptionSpec] = &[
     &CapabilityBoundingSet,
     &SystemCallFilter,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn address_families_are_sorted() {
+        assert!(ADDRESS_FAMILIES.is_sorted());
+    }
+}

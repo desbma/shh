@@ -779,4 +779,51 @@ mod tests {
             assert!(!candidates[0].to_string().contains("CAP_BLOCK_SUSPEND"));
         }
     }
+
+    #[test]
+    fn resolve_restrict_address_families_nfc_mctp() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let (opts, hardening_opts) = test_options_standard(&["RestrictAddressFamilies"]);
+
+        for (af, proto) in [("AF_MCTP", "SOCK_DGRAM"), ("AF_NFC", "SOCK_SEQPACKET")] {
+            let actions = vec![ProgramAction::NetworkActivity(
+                NetworkActivity {
+                    af: SetSpecifier::One(SocketFamily::Other(af.into())),
+                    proto: SetSpecifier::One(proto.parse().unwrap()),
+                    kind: SetSpecifier::One(NetworkActivityKind::SocketCreation),
+                    local_port: SetSpecifier::All,
+                    address: SetSpecifier::All,
+                }
+                .into(),
+            )];
+            let candidates = resolve(&opts, &actions, &hardening_opts);
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(
+                candidates[0].to_string(),
+                format!("RestrictAddressFamilies={af}")
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_capability_bounding_set_raw_unlisted_family() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let (opts, hardening_opts) = test_options_standard(&["CapabilityBoundingSet"]);
+
+        let actions = vec![ProgramAction::NetworkActivity(
+            NetworkActivity {
+                af: SetSpecifier::One(SocketFamily::Other("AF_UNLISTED".into())),
+                proto: SetSpecifier::One(SocketProtocol::Other("SOCK_RAW".into())),
+                kind: SetSpecifier::One(NetworkActivityKind::SocketCreation),
+                local_port: SetSpecifier::All,
+                address: SetSpecifier::All,
+            }
+            .into(),
+        )];
+        let candidates = resolve(&opts, &actions, &hardening_opts);
+        assert_eq!(candidates.len(), 1);
+        assert!(!candidates[0].to_string().contains("CAP_NET_RAW"));
+    }
 }

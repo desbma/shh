@@ -1,4 +1,4 @@
-//! Build script to generate syscall map
+//! Build script to generate constants read from the build host
 
 #![expect(clippy::unwrap_used)]
 
@@ -18,6 +18,40 @@ fn is_syscall_line(l: &str) -> bool {
 
 /// Ignored classes it would make no sense to backlist
 const IGNORED_CLASSES: [&str; 3] = ["default", "known", "system-service"];
+
+/// Read the sorted address family names of the C library socket header, excluding `AF_UNSPEC` and `AF_MAX`
+fn address_families() -> Vec<String> {
+    // Same extraction as https://github.com/systemd/systemd/blob/v257/src/basic/generate-af-list.sh
+    let output = Command::new("cc")
+        .args(["-E", "-dM", "-include", "sys/socket.h", "-"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let mut families: Vec<_> = output
+        .stdout
+        .lines()
+        .map(Result::unwrap)
+        .filter_map(|l| {
+            let mut tokens = l.split_whitespace();
+            match (tokens.next(), tokens.next(), tokens.next()) {
+                (Some("#define"), Some(name), Some(value))
+                    if name.starts_with("AF_")
+                        && !["AF_UNSPEC", "AF_MAX"].contains(&name)
+                        && (value.starts_with("AF_") || value.starts_with("PF_")) =>
+                {
+                    Some(name.to_owned())
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    families.sort_unstable();
+    families
+}
 
 fn main() {
     // Run systemd-analyze to get syscall list & groups
@@ -70,4 +104,11 @@ fn main() {
         .map(ToOwned::to_owned)
         .unwrap_or(const_declarations);
     fs::write(&dest_path, const_declarations).unwrap();
+
+    let address_families = address_families();
+    fs::write(
+        Path::new(&out_dir).join("address_families.rs"),
+        format!("const ADDRESS_FAMILIES: &[&str] = &{address_families:?};"),
+    )
+    .unwrap();
 }
