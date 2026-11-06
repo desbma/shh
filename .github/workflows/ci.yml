@@ -36,6 +36,7 @@ jobs:
       - run: |
           systemd_version="$(systemctl --version | awk 'NR == 1 { print $2 }')"
           [ "${systemd_version}" -ge 256 ] || { echo "Skipping integration tests: systemd ${systemd_version} < 256"; exit 0; }
+          sudo apt update
           sudo apt install debootstrap systemd-container qemu-system-x86 virtiofsd
           ./test-env/setup debian-trixie
           ./test-all --skip ping
