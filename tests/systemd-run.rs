@@ -519,4 +519,19 @@ ptrace(PTRACE_DETACH, target_pid)
         let cmd = ["python3", "-c", script, &user];
         profile_and_run(&cmd, false);
     }
+
+    #[test]
+    fn systemd_run_wake_lock() {
+        // Take and release a wake lock, requiring CAP_BLOCK_SUSPEND
+        if !fs::exists("/sys/power/wake_lock").unwrap() {
+            eprintln!("Kernel built without CONFIG_PM_WAKELOCKS, skipping");
+            return;
+        }
+        let cmd = [
+            "sh",
+            "-c",
+            "echo shh-test > /sys/power/wake_lock && echo shh-test > /sys/power/wake_unlock",
+        ];
+        profile_and_run(&cmd, false);
+    }
 }

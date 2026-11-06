@@ -765,4 +765,18 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         assert!(!candidates[0].to_string().contains("CAP_SYS_PTRACE"));
     }
+
+    #[test]
+    fn resolve_capability_bounding_set_wake_lock() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let (opts, hardening_opts) = test_options_standard(&["CapabilityBoundingSet"]);
+
+        for path in ["/sys/power/wake_lock", "/sys/power/wake_unlock"] {
+            let actions = vec![ProgramAction::Write(path.into())];
+            let candidates = resolve(&opts, &actions, &hardening_opts);
+            assert_eq!(candidates.len(), 1);
+            assert!(!candidates[0].to_string().contains("CAP_BLOCK_SUSPEND"));
+        }
+    }
 }

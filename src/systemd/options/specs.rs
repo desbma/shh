@@ -1358,7 +1358,12 @@ impl OptionSpec for CapabilityBoundingSet {
             (
                 "CAP_BLOCK_SUSPEND",
                 OptionValueEffect::Multiple(vec![
-                    OptionValueEffect::DenyWrite(PathDescription::base("/proc/sys/wake_lock")),
+                    // capabilities(7) mentions /proc/sys/wake_lock, but the kernel interface is the
+                    // wake_{lock,unlock} files of the /sys/power directory:
+                    // https://github.com/torvalds/linux/blob/v6.12/Documentation/ABI/testing/sysfs-power#L216
+                    // https://github.com/torvalds/linux/blob/v6.12/Documentation/ABI/testing/sysfs-power#L243
+                    OptionValueEffect::DenyWrite(PathDescription::base("/sys/power/wake_lock")),
+                    OptionValueEffect::DenyWrite(PathDescription::base("/sys/power/wake_unlock")),
                     OptionValueEffect::DenyAction(DeniableAction::Wakeup),
                 ]),
             ),
