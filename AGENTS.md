@@ -4,7 +4,7 @@
 
 - Build: `cargo build` (release: `cargo build --release`)
 - Check/Lint: `cargo clippy --all-targets --features generate-extras` (pedantic + restriction lints enabled)
-- Format: `cargo +nightly fmt --check -- --config imports_granularity=Crate --config group_imports=StdExternalCrate`
+- Format: `cargo +nightly fmt --check -- --config imports_granularity=Crate --config group_imports=StdExternalCrate --config hex_literal_case=Lower --config format_macro_matchers=true`
 - Test: `cargo test --features generate-extras`
 - Single test: `cargo test <test_name>`
 
