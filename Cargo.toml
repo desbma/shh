@@ -8,7 +8,7 @@ keywords = ["systemd", "hardening", "strace", "system", "security"]
 categories = ["command-line-utilities"]
 license = "GPL-3.0-only"
 version = "2026.3.8"
-rust-version = "1.88"
+rust-version = "1.89"
 edition = "2024"
 exclude = ["test-env/target"]
 
