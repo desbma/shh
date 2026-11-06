@@ -47,7 +47,10 @@ pub(crate) struct OptionDescription {
 }
 
 impl OptionDescription {
-    pub(crate) fn write_markdown<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    pub(crate) fn write_markdown<W>(&self, w: &mut W) -> io::Result<()>
+    where
+        W: Write,
+    {
         const MARKDOWN_IDENT: &str = "  ";
         writeln!(
             w,
@@ -461,8 +464,8 @@ pub(crate) struct OptionWithValue<T> {
 impl<T: PartialEq> OptionWithValue<T> {
     /// Merge current option with another if we can, return true if we succeeded
     pub(crate) fn merge(&mut self, other: &Self) -> bool {
-        if self.name == other.name {
-            match (&mut self.value, &other.value) {
+        self.name == other.name
+            && match (&mut self.value, &other.value) {
                 (
                     OptionValue::List(ListOptionValue {
                         values,
@@ -495,9 +498,6 @@ impl<T: PartialEq> OptionWithValue<T> {
                 }
                 _ => false,
             }
-        } else {
-            false
-        }
     }
 }
 
