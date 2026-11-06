@@ -390,18 +390,30 @@ impl Service {
     }
 
     pub(crate) fn reset_failed(&self) -> anyhow::Result<()> {
-        match self.action("reset-failed", true) {
-            Ok(()) => Ok(()),
-            Err(err)
-                if self.arg.is_some()
-                    && err.root_cause().to_string().starts_with("systemctl failed") =>
-            {
-                // Templated instances can cause systemctl to return 1 if not running,
-                // ignore it
-                Ok(())
-            }
-            Err(err) => Err(err),
+        let unit_name = self.unit_name();
+        log::info!("reset-failed {unit_name}");
+        let mut cmd = Command::new("systemctl");
+        cmd.arg("reset-failed");
+        if matches!(self.instance, InstanceKind::User) {
+            cmd.arg("--user");
         }
+        let output = cmd.arg(&unit_name).output()?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim_end();
+        anyhow::ensure!(
+            output.status.success() || self.is_not_loaded_error(stderr),
+            "systemctl failed: {status}: {stderr}",
+            status = output.status
+        );
+        Ok(())
+    }
+
+    /// Check if a `systemctl` error message reports this unit is not loaded
+    fn is_not_loaded_error(&self, msg: &str) -> bool {
+        // Unit names can contain ':' but not spaces
+        msg.split_once(": ").is_some_and(|(_, err)| {
+            err == format!("Unit {unit_name} not loaded.", unit_name = self.unit_name())
+        })
     }
 
     pub(crate) fn action(&self, verb: &str, block: bool) -> anyhow::Result<()> {
@@ -647,5 +659,29 @@ VAR=`cd /usr/bin/..; /usr/bin/galera_recovery`; [ $? -eq 0 ] \
                 r#"/bin/sh -c "[ ! -e /usr/bin/galera_recovery ] && VAR= ||  VAR=`cd /usr/bin/..; /usr/bin/galera_recovery`; [ $? -eq 0 ]  && systemctl set-environment _WSREP_START_POSITION=$VAR || exit 1""#
             ]
         );
+    }
+
+    #[test]
+    fn not_loaded_error() {
+        let service = Service::new("foo@a:b", InstanceKind::System).unwrap();
+        assert!(service.is_not_loaded_error(
+            "Failed to reset failed state of unit foo@a:b.service: Unit foo@a:b.service not loaded."
+        ));
+    }
+
+    #[test]
+    fn not_loaded_error_other_unit() {
+        let service = Service::new("foo", InstanceKind::System).unwrap();
+        assert!(!service.is_not_loaded_error(
+            "Failed to reset failed state of unit bar.service: Unit bar.service not loaded."
+        ));
+    }
+
+    #[test]
+    fn not_loaded_error_other_error() {
+        let service = Service::new("foo", InstanceKind::System).unwrap();
+        assert!(!service.is_not_loaded_error(
+            "Failed to reset failed state of unit foo.service: Access denied"
+        ));
     }
 }
