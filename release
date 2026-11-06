@@ -1,4 +1,4 @@
-#!/bin/bash -eux
+#!/bin/bash -eu
 
 set -o pipefail
 
@@ -21,12 +21,7 @@ cargo update
 cargo check
 cargo test
 
+git cliff --tag "v${VERSION}" | head -n -3 > CHANGELOG.md
+
 jj new
-
-git tag -f -m "Version ${VERSION}" "v${VERSION}"
-git cliff | head -n -3 > CHANGELOG.md
-git tag -d "v${VERSION}"
-
-jj squash -u
-
-git tag -f -m "Version ${VERSION}" "v${VERSION}"
+jj tag set -r @- "v${VERSION}"
