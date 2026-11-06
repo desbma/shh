@@ -262,7 +262,7 @@ impl OptionSpec for ProtectKernelTunables {
                         "fs/",
                         "irq/",
                         "latency_stats",
-                        "mttr",
+                        "mtrr",
                         "scsi/",
                         "sys/",
                         "sysrq-trigger",

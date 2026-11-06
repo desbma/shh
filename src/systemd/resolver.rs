@@ -744,6 +744,17 @@ mod tests {
     }
 
     #[test]
+    fn resolve_protect_kernel_tunables_mtrr() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let (opts, hardening_opts) = test_options_standard(&["ProtectKernelTunables"]);
+
+        let actions = vec![ProgramAction::Write("/proc/mtrr".into())];
+        let candidates = resolve(&opts, &actions, &hardening_opts);
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
     fn resolve_capability_bounding_set_ptrace() {
         let _ = simple_logger::SimpleLogger::new().init();
 
