@@ -742,4 +742,16 @@ mod tests {
         let candidates = resolve(&opts, &actions, &hardening_opts);
         assert!(candidates.is_empty());
     }
+
+    #[test]
+    fn resolve_capability_bounding_set_ptrace() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let (opts, hardening_opts) = test_options_standard(&["CapabilityBoundingSet"]);
+
+        let actions = vec![ProgramAction::Syscalls(["ptrace".into()].into())];
+        let candidates = resolve(&opts, &actions, &hardening_opts);
+        assert_eq!(candidates.len(), 1);
+        assert!(!candidates[0].to_string().contains("CAP_SYS_PTRACE"));
+    }
 }

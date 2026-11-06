@@ -137,19 +137,25 @@ mod tests {
         combinations
     }
 
+    /// Profile a command with every `shh run` option set, and run it with the generated options as a
+    /// system or user service
+    fn profile_and_run(cmd: &[&str], user: bool) {
+        for shh_opts in &*ALL_SHH_RUN_OPTS {
+            let mut shh_opts = shh_opts.clone();
+            if user {
+                shh_opts.extend(["-i", "user"]);
+            }
+            eprintln!("shh run option: {}", shh_opts.join(" "));
+            let sd_opts = generate_options(cmd, &shh_opts);
+            let _ = systemd_run(cmd, &sd_opts, user);
+        }
+    }
+
     #[test]
     fn systemd_run_true() {
         let cmd = ["true"];
         for user in [false, true] {
-            for shh_opts in &*ALL_SHH_RUN_OPTS {
-                let mut shh_opts = shh_opts.clone();
-                if user {
-                    shh_opts.extend(["-i", "user"]);
-                }
-                eprintln!("shh run option: {}", shh_opts.join(" "));
-                let sd_opts = generate_options(&cmd, &shh_opts);
-                let _ = systemd_run(&cmd, &sd_opts, user);
-            }
+            profile_and_run(&cmd, user);
         }
     }
 
@@ -157,15 +163,7 @@ mod tests {
     fn systemd_run_write_dev_null() {
         let cmd = ["sh", "-c", ": > /dev/null"];
         for user in [false, true] {
-            for shh_opts in &*ALL_SHH_RUN_OPTS {
-                let mut shh_opts = shh_opts.clone();
-                if user {
-                    shh_opts.extend(["-i", "user"]);
-                }
-                eprintln!("shh run option: {}", shh_opts.join(" "));
-                let sd_opts = generate_options(&cmd, &shh_opts);
-                let _ = systemd_run(&cmd, &sd_opts, user);
-            }
+            profile_and_run(&cmd, user);
         }
     }
 
@@ -191,15 +189,7 @@ mod tests {
     fn systemd_run_ls_proc() {
         let cmd = ["ls", "/proc/1"];
         for user in [false, true] {
-            for shh_opts in &*ALL_SHH_RUN_OPTS {
-                let mut shh_opts = shh_opts.clone();
-                if user {
-                    shh_opts.extend(["-i", "user"]);
-                }
-                eprintln!("shh run option: {}", shh_opts.join(" "));
-                let sd_opts = generate_options(&cmd, &shh_opts);
-                let _ = systemd_run(&cmd, &sd_opts, user);
-            }
+            profile_and_run(&cmd, user);
         }
     }
 
@@ -207,15 +197,7 @@ mod tests {
     fn systemd_run_read_kallsyms() {
         let cmd = ["head", "/proc/kallsyms"];
         for user in [false, true] {
-            for shh_opts in &*ALL_SHH_RUN_OPTS {
-                let mut shh_opts = shh_opts.clone();
-                if user {
-                    shh_opts.extend(["-i", "user"]);
-                }
-                eprintln!("shh run option: {}", shh_opts.join(" "));
-                let sd_opts = generate_options(&cmd, &shh_opts);
-                let _ = systemd_run(&cmd, &sd_opts, user);
-            }
+            profile_and_run(&cmd, user);
         }
     }
 
@@ -223,15 +205,7 @@ mod tests {
     fn systemd_run_ls_modules() {
         let cmd = ["ls", "/usr/lib/modules/"];
         for user in [false, true] {
-            for shh_opts in &*ALL_SHH_RUN_OPTS {
-                let mut shh_opts = shh_opts.clone();
-                if user {
-                    shh_opts.extend(["-i", "user"]);
-                }
-                eprintln!("shh run option: {}", shh_opts.join(" "));
-                let sd_opts = generate_options(&cmd, &shh_opts);
-                let _ = systemd_run(&cmd, &sd_opts, user);
-            }
+            profile_and_run(&cmd, user);
         }
     }
 
@@ -271,15 +245,7 @@ mod tests {
     fn systemd_run_ss() {
         let cmd = ["ss", "-l"];
         for user in [false, true] {
-            for shh_opts in &*ALL_SHH_RUN_OPTS {
-                let mut shh_opts = shh_opts.clone();
-                if user {
-                    shh_opts.extend(["-i", "user"]);
-                }
-                eprintln!("shh run option: {}", shh_opts.join(" "));
-                let sd_opts = generate_options(&cmd, &shh_opts);
-                let _ = systemd_run(&cmd, &sd_opts, user);
-            }
+            profile_and_run(&cmd, user);
         }
     }
 
@@ -291,15 +257,7 @@ mod tests {
             "import mmap; mmap.mmap(-1, 4096, prot=mmap.PROT_WRITE|mmap.PROT_EXEC)",
         ];
         for user in [false, true] {
-            for shh_opts in &*ALL_SHH_RUN_OPTS {
-                let mut shh_opts = shh_opts.clone();
-                if user {
-                    shh_opts.extend(["-i", "user"]);
-                }
-                eprintln!("shh run option: {}", shh_opts.join(" "));
-                let sd_opts = generate_options(&cmd, &shh_opts);
-                let _ = systemd_run(&cmd, &sd_opts, user);
-            }
+            profile_and_run(&cmd, user);
         }
     }
 
@@ -310,11 +268,7 @@ mod tests {
             "-c",
             "import os; os.sched_setscheduler(0, os.SCHED_RR, os.sched_param(os.sched_get_priority_min(os.SCHED_RR)))",
         ];
-        for shh_opts in &*ALL_SHH_RUN_OPTS {
-            eprintln!("shh run option: {}", shh_opts.join(" "));
-            let sd_opts = generate_options(&cmd, shh_opts);
-            let _ = systemd_run(&cmd, &sd_opts, false);
-        }
+        profile_and_run(&cmd, false);
     }
 
     #[test]
@@ -325,15 +279,7 @@ mod tests {
             "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.bind((\"127.0.0.1\", 1234))",
         ];
         for user in [false, true] {
-            for shh_opts in &*ALL_SHH_RUN_OPTS {
-                let mut shh_opts = shh_opts.clone();
-                if user {
-                    shh_opts.extend(["-i", "user"]);
-                }
-                eprintln!("shh run option: {}", shh_opts.join(" "));
-                let sd_opts = generate_options(&cmd, &shh_opts);
-                let _ = systemd_run(&cmd, &sd_opts, user);
-            }
+            profile_and_run(&cmd, user);
         }
     }
 
@@ -344,21 +290,13 @@ mod tests {
             "-c",
             "import socket; socket.socket(socket.AF_PACKET, socket.SOCK_RAW)",
         ];
-        for shh_opts in &*ALL_SHH_RUN_OPTS {
-            eprintln!("shh run option: {}", shh_opts.join(" "));
-            let sd_opts = generate_options(&cmd, shh_opts);
-            let _ = systemd_run(&cmd, &sd_opts, false);
-        }
+        profile_and_run(&cmd, false);
     }
 
     #[test]
     fn systemd_run_syslog() {
         let cmd = ["dmesg", "-S"];
-        for shh_opts in &*ALL_SHH_RUN_OPTS {
-            eprintln!("shh run option: {}", shh_opts.join(" "));
-            let sd_opts = generate_options(&cmd, shh_opts);
-            let _ = systemd_run(&cmd, &sd_opts, false);
-        }
+        profile_and_run(&cmd, false);
     }
 
     #[test]
@@ -551,5 +489,34 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn systemd_run_ptrace_attach() {
+        // Attach to and detach from a different user's process, requiring CAP_SYS_PTRACE
+        let script = r#"
+import ctypes, os, subprocess, sys
+
+# Request values from <sys/ptrace.h>
+PTRACE_ATTACH = 16
+PTRACE_DETACH = 17
+
+libc = ctypes.CDLL("libc.so.6", use_errno=True)
+
+def ptrace(request, pid):
+    if libc.ptrace(request, pid, None, None) != 0:
+        errno = ctypes.get_errno()
+        raise OSError(errno, os.strerror(errno))
+
+# Oldest process of the user, kept running by lingering in the test environment
+target_pid = int(subprocess.check_output(["pgrep", "--oldest", "--euid", sys.argv[1]]))
+ptrace(PTRACE_ATTACH, target_pid)
+# Attaching stops the target, it must be waited for before it can be detached
+os.waitpid(target_pid, 0)
+ptrace(PTRACE_DETACH, target_pid)
+"#;
+        let user = env::var("TEST_USER").unwrap();
+        let cmd = ["python3", "-c", script, &user];
+        profile_and_run(&cmd, false);
     }
 }

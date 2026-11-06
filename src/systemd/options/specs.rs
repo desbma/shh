@@ -1483,7 +1483,7 @@ impl OptionSpec for CapabilityBoundingSet {
                 "CAP_SYS_PTRACE",
                 OptionValueEffect::Multiple(vec![
                     // TODO distinguish other processes
-                    OptionValueEffect::DenySyscalls(DenySyscalls::Single("ptrace)")),
+                    OptionValueEffect::DenySyscalls(DenySyscalls::Single("ptrace")),
                     OptionValueEffect::DenySyscalls(DenySyscalls::Single("get_robust_list")),
                     OptionValueEffect::DenySyscalls(DenySyscalls::Single("process_vm_readv")),
                     OptionValueEffect::DenySyscalls(DenySyscalls::Single("process_vm_writev")),
