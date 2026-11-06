@@ -20,7 +20,9 @@ use rand::RngExt as _;
 use super::InstanceKind;
 use crate::{
     cl::HardeningOptions,
-    systemd::{JournalCursor, journal::ProfilingLogError, options::OptionWithValue},
+    systemd::{
+        JournalCursor, config::UnitConfig, journal::ProfilingLogError, options::OptionWithValue,
+    },
 };
 
 pub(crate) struct Service {
@@ -182,8 +184,10 @@ impl Service {
         );
 
         // Read current config
-        let current_config = self.cat_config().context("Failed to cat service config")?;
-        let is_container = current_config.lines().any(|l| l == "[Container]");
+        let current_config = self
+            .read_config()
+            .context("Failed to read service config")?;
+        let is_container = current_config.has_section("Container");
         if is_container {
             log::info!("Detected unit generated from .container template");
         }
@@ -195,18 +199,20 @@ impl Service {
         Self::write_fragment_header(&mut fragment_file)?;
         writeln!(fragment_file, "[Service]")?;
         // writeln!(fragment_file, "AmbientCapabilities=CAP_SYS_PTRACE")?;
-        let service_type = Self::config_vals("Type", &current_config)?;
-        let service_type = service_type.last().map(String::as_str);
-        if service_type.is_some_and(|v| v.starts_with("notify")) {
+        let service_type = self.property("Type")?;
+        if service_type.starts_with("notify") {
             // needed because strace becomes the main process
             writeln!(fragment_file, "NotifyAccess=all")?;
         }
-        if service_type.is_some_and(|v| v == "forking") {
+        if service_type == "forking" {
             // strace wrapping keeps the main process alive, so forking semantics no longer apply
             writeln!(fragment_file, "Type=simple")?;
         }
         writeln!(fragment_file, "Environment=RUST_BACKTRACE=1")?;
-        if !Self::config_vals("SystemCallFilter", &current_config)?.is_empty() {
+        if !current_config
+            .values("Service", "SystemCallFilter")
+            .is_empty()
+        {
             // Allow ptracing, only if a syscall filter is already in place, otherwise it becomes a whitelist
             writeln!(fragment_file, "SystemCallFilter=@debug")?;
         }
@@ -214,10 +220,10 @@ impl Service {
             // strace parsing may slow down enough to risk reaching some service timeouts,
             // but some services also never stop if we set this unconditionally to infinity
             for timeout_config in ["TimeoutStartSec", "TimeoutStopSec"] {
-                let timeout = if let Some(timeout) =
-                    Self::config_vals(timeout_config, &current_config)?
-                        .last()
-                        .and_then(|t| systemd_duration::stdtime::parse(t).ok())
+                let timeout = if let Some(timeout) = current_config
+                    .values("Service", timeout_config)
+                    .last()
+                    .and_then(|t| systemd_duration::stdtime::parse(t).ok())
                 {
                     // Double timeout if we have one
                     format!("{}s", timeout.as_secs() * 2)
@@ -263,7 +269,7 @@ impl Service {
         let mut exec_start_idx = 1;
         let mut profile_data_paths = Vec::new();
         for exec_start_opt in ["ExecStartPre", "ExecStart", "ExecStartPost"] {
-            let exec_start_cmds = Self::config_vals(exec_start_opt, &current_config)?;
+            let exec_start_cmds = current_config.values("Service", exec_start_opt);
             if !exec_start_cmds.is_empty() {
                 writeln!(fragment_file, "{exec_start_opt}=")?;
             }
@@ -475,50 +481,6 @@ impl Service {
         }
     }
 
-    fn config_vals(key: &str, config: &str) -> anyhow::Result<Vec<String>> {
-        // Note: we could use 'systemctl show -p xxx' but its output is different from config
-        // files, and we would need to interpret it anyway
-        let mut vals = Vec::new();
-        let prefix = format!("{key}=");
-        let mut lines = config.lines();
-        while let Some(line) = lines.next() {
-            if let Some(line_val) = line.strip_prefix(&prefix) {
-                let val = if line_val.ends_with('\\') {
-                    let mut val = line_val.trim_start().to_owned();
-                    // Remove trailing '\'
-                    val.pop();
-                    // Append next lines
-                    loop {
-                        let next_line = lines
-                            .next()
-                            .ok_or_else(|| anyhow::anyhow!("Unexpected end of file"))?;
-                        val = format!("{} {}", val, next_line.trim_start());
-                        if next_line.ends_with('\\') {
-                            // Remove trailing '\'
-                            val.pop();
-                        } else {
-                            break;
-                        }
-                    }
-                    val
-                } else {
-                    line_val.trim().to_owned()
-                };
-                vals.push(val);
-            }
-        }
-        // Handles lines that reset previously set options
-        if let Some((last, _)) = vals
-            .split_inclusive(String::is_empty)
-            .rev()
-            .take(2)
-            .collect_tuple()
-        {
-            vals = last.to_vec();
-        }
-        Ok(vals)
-    }
-
     fn fragment_path(&self, name: &str, persistent: bool) -> PathBuf {
         // https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#System%20Unit%20Search%20Path
         let base_dir = if persistent {
@@ -568,20 +530,27 @@ impl Service {
         .collect()
     }
 
-    fn cat_config(&self) -> anyhow::Result<String> {
-        let unit_name = self.unit_name();
-        let mut cmd = vec!["cat"];
-        if matches!(self.instance, InstanceKind::User) {
-            cmd.push("--user");
+    fn read_config(&self) -> anyhow::Result<UnitConfig> {
+        // Note: we could use 'systemctl show -p xxx' but its output is different from config
+        // files, and we would need to interpret it anyway
+        let fragment_path = self.property("FragmentPath")?;
+        let dropin_paths = self.property("DropInPaths")?;
+        let dropin_paths = shlex::split(&dropin_paths)
+            .ok_or_else(|| anyhow::anyhow!("Unable to split drop-in paths {dropin_paths:?}"))?;
+        let mut config = UnitConfig::default();
+        let fragment = fs::read(&fragment_path)
+            .with_context(|| format!("Failed to read {fragment_path:?}"))?;
+        config
+            .add_file(&fragment)
+            .with_context(|| format!("Failed to parse {fragment_path:?}"))?;
+        // Like systemd, an error stops parsing a drop-in, but keeps the unit
+        for path in dropin_paths {
+            let dropin = fs::read(&path).with_context(|| format!("Failed to read {path:?}"))?;
+            if let Err(err) = config.add_file(&dropin) {
+                log::warn!("Ignoring the rest of {path:?}: {err:#}");
+            }
         }
-        cmd.push(&unit_name);
-        let output = Command::new("systemctl").args(cmd).output()?;
-        anyhow::ensure!(
-            output.status.success(),
-            "systemctl failed: {}",
-            output.status
-        );
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        Ok(config)
     }
 
     fn property(&self, prop: &str) -> anyhow::Result<String> {
@@ -615,51 +584,7 @@ impl Service {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::Write as _;
-
     use super::*;
-
-    #[test]
-    fn config_vals_override() {
-        let _ = simple_logger::SimpleLogger::new().init();
-
-        let mut cfg_file = String::new();
-
-        writeln!(cfg_file, "blah=a").unwrap();
-        writeln!(cfg_file, "blah=b").unwrap();
-        writeln!(cfg_file, "blah=").unwrap();
-        writeln!(cfg_file, "blah=c").unwrap();
-        writeln!(cfg_file, "blih=e").unwrap();
-        writeln!(cfg_file, "bloh=f").unwrap();
-        writeln!(cfg_file, "blah=d").unwrap();
-
-        assert_eq!(
-            Service::config_vals("blah", &cfg_file).unwrap(),
-            vec!["c", "d"]
-        );
-    }
-
-    #[test]
-    fn config_val_multiline() {
-        let _ = simple_logger::SimpleLogger::new().init();
-
-        let mut cfg_file = String::new();
-
-        writeln!(
-            cfg_file,
-            r#"ExecStartPre=/bin/sh -c "[ ! -e /usr/bin/galera_recovery ] && VAR= || \
-VAR=`cd /usr/bin/..; /usr/bin/galera_recovery`; [ $? -eq 0 ] \
-&& systemctl set-environment _WSREP_START_POSITION=$VAR || exit 1""#
-        )
-        .unwrap();
-
-        assert_eq!(
-            Service::config_vals("ExecStartPre", &cfg_file).unwrap(),
-            vec![
-                r#"/bin/sh -c "[ ! -e /usr/bin/galera_recovery ] && VAR= ||  VAR=`cd /usr/bin/..; /usr/bin/galera_recovery`; [ $? -eq 0 ]  && systemctl set-environment _WSREP_START_POSITION=$VAR || exit 1""#
-            ]
-        );
-    }
 
     #[test]
     fn not_loaded_error() {

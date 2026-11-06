@@ -1,5 +1,6 @@
 //! Systemd code
 
+mod config;
 mod journal;
 mod options;
 mod resolver;
