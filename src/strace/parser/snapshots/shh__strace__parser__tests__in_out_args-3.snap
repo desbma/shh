@@ -4,7 +4,7 @@ expression: "parse_line(\"176051      0.000020 recvmsg(3, {msg_namelen=128 => 16
 ---
 Parsed(Syscall(Syscall(
   pid: 176051,
-  rel_ts: 0.00002,
+  rel_ts: 2e-5,
   name: "recvmsg",
   args: [
     Integer(IntegerExpression(

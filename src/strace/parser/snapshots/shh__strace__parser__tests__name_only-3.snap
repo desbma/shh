@@ -4,7 +4,7 @@ expression: result
 ---
 Parsed(Syscall(Syscall(
   pid: 641342,
-  rel_ts: 0.000022,
+  rel_ts: 2.2e-5,
   name: "openat",
   args: [
     Integer(IntegerExpression(

@@ -4,7 +4,7 @@ expression: "parse_line(\"772627      0.000010 newfstatat(AT_FDCWD, \\\"\\\\x2f\
 ---
 Parsed(Syscall(Syscall(
   pid: 772627,
-  rel_ts: 0.00001,
+  rel_ts: 1e-5,
   name: "newfstatat",
   args: [
     Integer(IntegerExpression(

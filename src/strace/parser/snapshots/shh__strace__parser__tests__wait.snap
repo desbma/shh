@@ -4,7 +4,7 @@ expression: "parse_line(\"30192      0.000010 wait4(30247, [{WIFEXITED(s) && WEX
 ---
 Parsed(Syscall(Syscall(
   pid: 30192,
-  rel_ts: 0.00001,
+  rel_ts: 1e-5,
   name: "wait4",
   args: [
     Integer(IntegerExpression(

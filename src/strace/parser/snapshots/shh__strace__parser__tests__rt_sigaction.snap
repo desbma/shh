@@ -4,7 +4,7 @@ expression: "parse_line(\"720313      0.000064 rt_sigaction(SIGTERM, {sa_handler
 ---
 Parsed(Syscall(Syscall(
   pid: 720313,
-  rel_ts: 0.000064,
+  rel_ts: 6.4e-5,
   name: "rt_sigaction",
   args: [
     Integer(IntegerExpression(

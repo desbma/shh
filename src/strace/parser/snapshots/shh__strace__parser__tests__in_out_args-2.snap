@@ -4,7 +4,7 @@ expression: "parse_line(\"237494      0.000026 getpeername(3, {sa_family=AF_UNIX
 ---
 Parsed(Syscall(Syscall(
   pid: 237494,
-  rel_ts: 0.000026,
+  rel_ts: 2.6e-5,
   name: "getpeername",
   args: [
     Integer(IntegerExpression(

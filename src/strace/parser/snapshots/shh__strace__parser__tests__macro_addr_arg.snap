@@ -4,7 +4,7 @@ expression: "parse_line(\"813299      0.000023 connect(93, {sa_family=AF_INET6, 
 ---
 Parsed(Syscall(Syscall(
   pid: 813299,
-  rel_ts: 0.000023,
+  rel_ts: 2.3e-5,
   name: "connect",
   args: [
     Integer(IntegerExpression(

@@ -4,7 +4,7 @@ expression: "parse_line(\"815537      0.000017 getrandom(\\\"\\\\x42\\\\x18\\\\x
 ---
 Parsed(Syscall(Syscall(
   pid: 815537,
-  rel_ts: 0.000017,
+  rel_ts: 1.7e-5,
   name: "getrandom",
   args: [
     Buffer(BufferExpression(

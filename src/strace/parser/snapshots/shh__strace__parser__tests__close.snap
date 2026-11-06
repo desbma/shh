@@ -4,7 +4,7 @@ expression: "parse_line(\"246722      0.000003 close(39<\\\\x2f\\\\x6d\\\\x65\\\
 ---
 Parsed(Syscall(Syscall(
   pid: 246722,
-  rel_ts: 0.000003,
+  rel_ts: 3e-6,
   name: "close",
   args: [
     Integer(IntegerExpression(

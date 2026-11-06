@@ -4,7 +4,7 @@ expression: "parse_line(\"998518      0.000033 openat(AT_FDCWD<\\\\x2f\\\\x68\\\
 ---
 Parsed(Syscall(Syscall(
   pid: 998518,
-  rel_ts: 0.000033,
+  rel_ts: 3.3e-5,
   name: "openat",
   args: [
     Integer(IntegerExpression(

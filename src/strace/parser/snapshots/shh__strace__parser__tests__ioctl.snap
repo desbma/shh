@@ -4,7 +4,7 @@ expression: "parse_line(\"34274      0.000058 ioctl(1<\\\\x2f\\\\x64\\\\x65\\\\x
 ---
 Parsed(Syscall(Syscall(
   pid: 34274,
-  rel_ts: 0.000058,
+  rel_ts: 5.8e-5,
   name: "ioctl",
   args: [
     Integer(IntegerExpression(

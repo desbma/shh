@@ -4,7 +4,7 @@ expression: "parse_line(\"688129      0.000023 bind(4<\\\\x73\\\\x6f\\\\x63\\\\x
 ---
 Parsed(Syscall(Syscall(
   pid: 688129,
-  rel_ts: 0.000023,
+  rel_ts: 2.3e-5,
   name: "bind",
   args: [
     Integer(IntegerExpression(

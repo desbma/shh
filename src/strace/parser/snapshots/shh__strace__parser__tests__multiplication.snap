@@ -4,7 +4,7 @@ expression: "parse_line(\"85195      0.000038 prlimit64(0, RLIMIT_NOFILE, {rlim_
 ---
 Parsed(Syscall(Syscall(
   pid: 85195,
-  rel_ts: 0.000038,
+  rel_ts: 3.8e-5,
   name: "prlimit64",
   args: [
     Integer(IntegerExpression(

@@ -4,7 +4,7 @@ expression: "parse_line(\"714433      0.000035 clone(child_stack=NULL, flags=CLO
 ---
 Parsed(Syscall(Syscall(
   pid: 714433,
-  rel_ts: 0.000035,
+  rel_ts: 3.5e-5,
   name: "clone",
   args: [
     Struct({

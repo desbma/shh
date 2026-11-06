@@ -4,7 +4,7 @@ expression: "parse_line(r#\"39270      0.000020 connect(11<\\x73\\x6f\\x63\\x6b\
 ---
 Parsed(Syscall(Syscall(
   pid: 39270,
-  rel_ts: 0.00002,
+  rel_ts: 2e-5,
   name: "connect",
   args: [
     Integer(IntegerExpression(

@@ -4,7 +4,7 @@ expression: "parse_line(\"794046      0.000024 capset({version=_LINUX_CAPABILITY
 ---
 Parsed(Syscall(Syscall(
   pid: 794046,
-  rel_ts: 0.000024,
+  rel_ts: 2.4e-5,
   name: "capset",
   args: [
     Struct({

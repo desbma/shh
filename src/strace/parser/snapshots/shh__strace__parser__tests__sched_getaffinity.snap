@@ -4,7 +4,7 @@ expression: "parse_line(\"231196      0.000017 sched_getaffinity(0, 512, [0 1 2 
 ---
 Parsed(Syscall(Syscall(
   pid: 231196,
-  rel_ts: 0.000017,
+  rel_ts: 1.7e-5,
   name: "sched_getaffinity",
   args: [
     Integer(IntegerExpression(

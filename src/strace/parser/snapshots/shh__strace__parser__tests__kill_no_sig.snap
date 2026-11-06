@@ -4,7 +4,7 @@ expression: "parse_line(\"51667      0.000002 kill(51668, 0)      = 0\",\n&HashS
 ---
 Parsed(Syscall(Syscall(
   pid: 51667,
-  rel_ts: 0.000002,
+  rel_ts: 2e-6,
   name: "kill",
   args: [
     Integer(IntegerExpression(

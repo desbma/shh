@@ -4,7 +4,7 @@ expression: "parse_line(\"114586      0.000075 epoll_ctl(3<\\\\x61\\\\x6e\\\\x6f
 ---
 Parsed(Syscall(Syscall(
   pid: 114586,
-  rel_ts: 0.000075,
+  rel_ts: 7.5e-5,
   name: "epoll_ctl",
   args: [
     Integer(IntegerExpression(

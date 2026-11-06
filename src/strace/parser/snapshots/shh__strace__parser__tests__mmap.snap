@@ -4,7 +4,7 @@ expression: "parse_line(\"382944      0.000054 mmap(NULL, 8192, PROT_READ|PROT_W
 ---
 Parsed(Syscall(Syscall(
   pid: 382944,
-  rel_ts: 0.000054,
+  rel_ts: 5.4e-5,
   name: "mmap",
   args: [
     Integer(IntegerExpression(

@@ -5,7 +5,7 @@ expression: syscalls
 [
   Syscall(
     pid: 2,
-    rel_ts: 0.000002,
+    rel_ts: 2e-6,
     name: "clock_gettime",
     args: [
       Integer(IntegerExpression(
@@ -30,7 +30,7 @@ expression: syscalls
   ),
   Syscall(
     pid: 1,
-    rel_ts: 0.000003,
+    rel_ts: 3e-6,
     name: "select",
     args: [
       Integer(IntegerExpression(

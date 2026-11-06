@@ -4,7 +4,7 @@ expression: "parse_line(\"244841      0.000033 fstatfs(6, {f_type=EXT2_SUPER_MAG
 ---
 Parsed(Syscall(Syscall(
   pid: 244841,
-  rel_ts: 0.000033,
+  rel_ts: 3.3e-5,
   name: "fstatfs",
   args: [
     Integer(IntegerExpression(
