@@ -578,8 +578,10 @@ impl OptionUpdater for ReadOnlyPaths {
         _opts: &HardeningOptions,
     ) -> Option<OptionValueEffect> {
         let action_path = match action {
-            ProgramAction::Write(action_path) => action_path.to_owned(),
-            ProgramAction::Create(action_path) => action_path.parent()?.to_owned(),
+            ProgramAction::Write(action_path) => action_path_exception(action_path.to_owned()),
+            ProgramAction::Create(action_path) | ProgramAction::Remove(action_path) => {
+                action_path.parent()?.to_owned()
+            }
             _ => return None,
         };
         match cur_effect {
@@ -739,7 +741,7 @@ impl OptionUpdater for InaccessiblePaths {
                     (action_path.to_owned(), true)
                 }
                 ProgramAction::Write(action_path) => (action_path.to_owned(), false),
-                ProgramAction::Create(action_path) => {
+                ProgramAction::Create(action_path) | ProgramAction::Remove(action_path) => {
                     (action_path.parent().map(Path::to_path_buf)?, false)
                 }
                 _ => return None,

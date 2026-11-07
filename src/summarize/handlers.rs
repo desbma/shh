@@ -454,37 +454,6 @@ impl SyscallHandler for MemfdCreateHandler {
     }
 }
 
-/// Handle mkdir-like syscalls
-pub(crate) struct MkdirHandler {
-    pub relfd: Option<usize>,
-    pub path: usize,
-}
-
-impl SyscallHandler for MkdirHandler {
-    fn handle(
-        &self,
-        sc: &Syscall,
-        actions: &mut Vec<ProgramAction>,
-        state: &mut ProgramState,
-    ) -> Result<(), HandlerError> {
-        let relfd = self.relfd.extract(sc)?;
-        let path = self.path.extract(sc)?;
-
-        let path = unpack_expr!(
-            path,
-            Expression::Buffer(BufferExpression {
-                value: b,
-                type_: BufferType::Unknown,
-            }) => PathBuf::from(OsStr::from_bytes(b))
-        );
-        if let Some(mut path) = resolve_path(&path, relfd, state.cur_dir.as_ref()) {
-            traverse_symlinks(&mut path, actions);
-            actions.push(ProgramAction::Create(path));
-        }
-        Ok(())
-    }
-}
-
 /// Handle mknod-like syscalls
 pub(crate) struct MknodHandler {
     pub path: FdOrPath<usize>,
@@ -1159,37 +1128,6 @@ impl SyscallHandler for StatFdHandler {
     }
 }
 
-/// Handle stat-like syscalls operating on a path possibly relative to a file descriptor
-pub(crate) struct StatPathHandler {
-    pub relfd: Option<usize>,
-    pub path: usize,
-}
-
-impl SyscallHandler for StatPathHandler {
-    fn handle(
-        &self,
-        sc: &Syscall,
-        actions: &mut Vec<ProgramAction>,
-        state: &mut ProgramState,
-    ) -> Result<(), HandlerError> {
-        let relfd = self.relfd.extract(sc)?;
-        let path = self.path.extract(sc)?;
-
-        let path = unpack_expr!(
-            path,
-            Expression::Buffer(BufferExpression {
-                value: b,
-                type_: BufferType::Unknown,
-            }) => PathBuf::from(OsStr::from_bytes(b))
-        );
-        if let Some(mut path) = resolve_path(&path, relfd, state.cur_dir.as_ref()) {
-            traverse_symlinks(&mut path, actions);
-            actions.push(ProgramAction::Read(path));
-        }
-        Ok(())
-    }
-}
-
 /// Handle `timer_create` syscall
 pub(crate) struct TimerCreateHandler {
     pub clockid: usize,
@@ -1213,6 +1151,81 @@ impl SyscallHandler for TimerCreateHandler {
         );
         if PRIVILEGED_CLOCK_NAMES.contains(&clock_name.as_str()) {
             actions.push(ProgramAction::SetAlarm);
+        }
+        Ok(())
+    }
+}
+
+/// Whether a path syscall acts on the target of the path's last component when it is a symlink
+pub(crate) enum FollowSymlink {
+    Always,
+    Never,
+    /// Unless `AT_SYMLINK_NOFOLLOW` is set in the flags argument at this index
+    UnlessNoFollowFlag(usize),
+}
+
+/// Handle syscalls acting on a path possibly relative to a file descriptor
+pub(crate) struct PathHandler {
+    pub relfd: Option<usize>,
+    pub path: usize,
+    pub follow: FollowSymlink,
+    pub action: fn(PathBuf) -> ProgramAction,
+}
+
+impl SyscallHandler for PathHandler {
+    fn handle(
+        &self,
+        sc: &Syscall,
+        actions: &mut Vec<ProgramAction>,
+        state: &mut ProgramState,
+    ) -> Result<(), HandlerError> {
+        let relfd = self.relfd.extract(sc)?;
+        let path = self.path.extract(sc)?;
+
+        let path = match path {
+            Expression::Buffer(BufferExpression {
+                value: b,
+                type_: BufferType::Unknown,
+            }) => PathBuf::from(OsStr::from_bytes(b)),
+            // A NULL path designates the relative file descriptor itself, like an empty one
+            Expression::Integer(IntegerExpression {
+                value: IntegerExpressionValue::NamedSymbol(s),
+                ..
+            }) if s == "NULL" => {
+                // Without a descriptor path, the call fails or changes nothing
+                if relfd.and_then(Expression::metadata).is_none() {
+                    return Ok(());
+                }
+                PathBuf::new()
+            }
+            other => return Err(err_expr_type!(other)),
+        };
+        let follow = match self.follow {
+            FollowSymlink::Always => true,
+            FollowSymlink::Never => false,
+            FollowSymlink::UnlessNoFollowFlag(flags) => {
+                let flags = unpack_expr!(
+                    flags.extract(sc)?,
+                    Expression::Integer(IntegerExpression { value, .. }) => value
+                );
+                !flags.is_flag_set("AT_SYMLINK_NOFOLLOW")
+            }
+        };
+        let path_bytes = path.as_os_str().as_bytes();
+        // A trailing slash or `.` component makes the kernel follow the last component
+        let follow = follow || path_bytes.ends_with(b"/") || path_bytes.ends_with(b"/.");
+        // A descriptor path is already resolved, and may designate a symlink itself
+        let traverse = !path_bytes.is_empty();
+
+        if let Some(mut path) = resolve_path(&path, relfd, state.cur_dir.as_ref()) {
+            if traverse {
+                if follow {
+                    traverse_symlinks(&mut path, actions);
+                } else {
+                    traverse_parent_symlinks(&mut path, actions);
+                }
+            }
+            actions.push((self.action)(path));
         }
         Ok(())
     }
@@ -1265,6 +1278,17 @@ fn traverse_symlinks(in_path: &mut PathBuf, actions: &mut Vec<ProgramAction>) {
             .into_iter()
             .map(ProgramAction::Read),
     );
+}
+
+/// Add actions for symlinks traversed to reach the parent of a path, resolve them in the path
+fn traverse_parent_symlinks(in_path: &mut PathBuf, actions: &mut Vec<ProgramAction>) {
+    let (Some(parent), Some(name)) = (in_path.parent(), in_path.file_name()) else {
+        return;
+    };
+    let mut parent = parent.to_path_buf();
+    traverse_symlinks(&mut parent, actions);
+    parent.push(name);
+    *in_path = parent;
 }
 
 /// Get all symlinks paths that need to be followed to access a path
@@ -1392,7 +1416,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::{
         fs::{self, File},
         net::IpAddr,
@@ -1545,7 +1569,7 @@ x86_Thread_features_locked:
     }
 
     // Helper to create a basic Syscall
-    fn make_syscall(name: &str, args: Vec<Expression>, ret_val: i64) -> Syscall {
+    pub(crate) fn make_syscall(name: &str, args: Vec<Expression>, ret_val: i64) -> Syscall {
         Syscall {
             pid: 1000,
             rel_ts: 0.0,
@@ -1559,7 +1583,7 @@ x86_Thread_features_locked:
     }
 
     // Helper to create a buffer expression
-    fn buf_expr(content: &[u8]) -> Expression {
+    pub(crate) fn buf_expr(content: &[u8]) -> Expression {
         Expression::Buffer(BufferExpression {
             value: content.to_vec(),
             type_: BufferType::Unknown,
@@ -1567,7 +1591,7 @@ x86_Thread_features_locked:
     }
 
     // Helper to create an integer expression from a literal
-    fn int_literal(val: i64) -> Expression {
+    pub(crate) fn int_literal(val: i64) -> Expression {
         Expression::Integer(IntegerExpression {
             value: IntegerExpressionValue::Literal(val),
             metadata: None,
@@ -1575,7 +1599,7 @@ x86_Thread_features_locked:
     }
 
     // Helper to create a named symbol integer expression
-    fn named_symbol(name: &str) -> Expression {
+    pub(crate) fn named_symbol(name: &str) -> Expression {
         Expression::Integer(IntegerExpression {
             value: IntegerExpressionValue::NamedSymbol(name.to_owned()),
             metadata: None,
@@ -1874,9 +1898,11 @@ x86_Thread_features_locked:
 
     #[test]
     fn mkdir_handler() {
-        let handler = MkdirHandler {
+        let handler = PathHandler {
             relfd: None,
             path: 0,
+            follow: FollowSymlink::Always,
+            action: ProgramAction::Create,
         };
         let sc = make_syscall("mkdir", vec![buf_expr(b"/tmp/newdir")], 0);
         let mut actions = vec![];
@@ -1889,9 +1915,11 @@ x86_Thread_features_locked:
 
     #[test]
     fn mkdirat_handler() {
-        let handler = MkdirHandler {
+        let handler = PathHandler {
             relfd: Some(0),
             path: 1,
+            follow: FollowSymlink::Always,
+            action: ProgramAction::Create,
         };
         let sc = make_syscall("mkdirat", vec![int_literal(3), buf_expr(b"subdir")], 0);
         let mut actions = vec![];
@@ -1904,9 +1932,11 @@ x86_Thread_features_locked:
 
     #[test]
     fn mkdir_handler_wrong_path_type() {
-        let handler = MkdirHandler {
+        let handler = PathHandler {
             relfd: None,
             path: 0,
+            follow: FollowSymlink::Always,
+            action: ProgramAction::Create,
         };
         let sc = make_syscall("mkdir", vec![int_literal(42)], 0);
         let mut actions = vec![];
@@ -3454,9 +3484,11 @@ x86_Thread_features_locked:
 
     #[test]
     fn stat_path_handler() {
-        let handler = StatPathHandler {
+        let handler = PathHandler {
             relfd: None,
             path: 0,
+            follow: FollowSymlink::Always,
+            action: ProgramAction::Read,
         };
         let sc = make_syscall("stat", vec![buf_expr(b"/etc/passwd")], 0);
         let mut actions = vec![];
@@ -3469,9 +3501,11 @@ x86_Thread_features_locked:
 
     #[test]
     fn statat_handler() {
-        let handler = StatPathHandler {
+        let handler = PathHandler {
             relfd: Some(0),
             path: 1,
+            follow: FollowSymlink::Always,
+            action: ProgramAction::Read,
         };
         let sc = make_syscall("statat", vec![int_literal(3), buf_expr(b"file")], 0);
         let mut actions = vec![];
@@ -3484,9 +3518,11 @@ x86_Thread_features_locked:
 
     #[test]
     fn stat_path_handler_wrong_type() {
-        let handler = StatPathHandler {
+        let handler = PathHandler {
             relfd: None,
             path: 0,
+            follow: FollowSymlink::Always,
+            action: ProgramAction::Read,
         };
         let sc = make_syscall("stat", vec![int_literal(42)], 0);
         let mut actions = vec![];

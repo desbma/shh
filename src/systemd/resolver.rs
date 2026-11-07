@@ -26,6 +26,13 @@ impl OptionValueEffect {
                 ProgramAction::Write(path_action) | ProgramAction::Create(path_action) => {
                     !ro_paths.matches(path_action)
                 }
+                // Removal also writes to the parent directory
+                ProgramAction::Remove(path_action) => {
+                    !ro_paths.matches(path_action)
+                        && path_action
+                            .parent()
+                            .is_none_or(|pap| !ro_paths.matches(pap))
+                }
                 _ => true,
             },
             OptionValueEffect::DenyExec(noexec_paths) => match action {
@@ -39,6 +46,13 @@ impl OptionValueEffect {
                 }
                 ProgramAction::Write(path_action) => {
                     !empty_paths.matches(path_action, false)
+                        || prev_actions.contains(&ProgramAction::Create(path_action.clone()))
+                }
+                ProgramAction::Remove(path_action) => {
+                    (!empty_paths.matches(path_action, false)
+                        && path_action
+                            .parent()
+                            .is_none_or(|pap| !empty_paths.matches(pap, false)))
                         || prev_actions.contains(&ProgramAction::Create(path_action.clone()))
                 }
                 ProgramAction::Create(path_action) => {
@@ -56,7 +70,8 @@ impl OptionValueEffect {
                 ProgramAction::Read(path_action)
                 | ProgramAction::Write(path_action)
                 | ProgramAction::Exec(path_action)
-                | ProgramAction::Create(path_action) => !removed_paths.matches(path_action),
+                | ProgramAction::Create(path_action)
+                | ProgramAction::Remove(path_action) => !removed_paths.matches(path_action),
                 _ => true,
             },
             OptionValueEffect::DenySyscalls(denied) => {
@@ -363,7 +378,7 @@ pub(crate) fn resolve(
 #[expect(clippy::shadow_unrelated)]
 #[cfg(test)]
 mod tests {
-    use std::net::IpAddr;
+    use std::{net::IpAddr, os::unix, slice};
 
     use super::*;
     use crate::{
@@ -544,52 +559,98 @@ mod tests {
         let _ = simple_logger::SimpleLogger::new().init();
 
         let (opts, hardening_opts) = test_options_standard(&["PrivateTmp"]);
+        let expected = [OptionWithValue {
+            name: "PrivateTmp",
+            value: OptionValue::Boolean(true),
+        }];
 
-        let actions = vec![];
-        let candidates = resolve(&opts, &actions, &hardening_opts);
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].to_string(), "PrivateTmp=true");
+        assert_eq!(resolve(&opts, &[], &hardening_opts), expected);
+        let actions = [ProgramAction::Create("/tmp/data".into())];
+        assert_eq!(resolve(&opts, &actions, &hardening_opts), expected);
 
-        let actions = vec![ProgramAction::Read("/tmp/data".into())];
-        let candidates = resolve(&opts, &actions, &hardening_opts);
-        assert_eq!(candidates.len(), 0);
-
-        let actions = vec![ProgramAction::Write("/tmp/data".into())];
-        let candidates = resolve(&opts, &actions, &hardening_opts);
-        assert_eq!(candidates.len(), 0);
-
-        let actions = vec![ProgramAction::Create("/tmp/data".into())];
-        let candidates = resolve(&opts, &actions, &hardening_opts);
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].to_string(), "PrivateTmp=true");
-
-        let actions = vec![ProgramAction::Exec("/tmp/data".into())];
-        let candidates = resolve(&opts, &actions, &hardening_opts);
-        assert_eq!(candidates.len(), 0);
-
-        let actions = vec![
-            ProgramAction::Create("/tmp/data".into()),
+        for action in [
             ProgramAction::Read("/tmp/data".into()),
-        ];
-        let candidates = resolve(&opts, &actions, &hardening_opts);
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].to_string(), "PrivateTmp=true");
-
-        let actions = vec![
-            ProgramAction::Create("/tmp/data".into()),
             ProgramAction::Write("/tmp/data".into()),
-        ];
+            ProgramAction::Exec("/tmp/data".into()),
+            ProgramAction::Remove("/tmp/data".into()),
+        ] {
+            assert!(resolve(&opts, slice::from_ref(&action), &hardening_opts).is_empty());
+            let actions = [ProgramAction::Create("/tmp/data".into()), action];
+            assert_eq!(resolve(&opts, &actions, &hardening_opts), expected);
+        }
+    }
+
+    #[test]
+    fn resolve_protect_system_remove() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let (opts, hardening_opts) = test_options_standard(&["ProtectSystem"]);
+
+        let actions = vec![ProgramAction::Remove("/var/cache/whatever".into())];
         let candidates = resolve(&opts, &actions, &hardening_opts);
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].to_string(), "PrivateTmp=true");
+        assert_eq!(candidates[0].to_string(), "ProtectSystem=full");
+
+        let actions = vec![ProgramAction::Remove("/etc/plop.conf".into())];
+        let candidates = resolve(&opts, &actions, &hardening_opts);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].to_string(), "ProtectSystem=true");
+    }
+
+    #[test]
+    fn resolve_read_only_paths_remove() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let (opts, hardening_opts) = test_options_strict(&["ReadOnlyPaths"]);
 
         let actions = vec![
-            ProgramAction::Create("/tmp/data".into()),
-            ProgramAction::Exec("/tmp/data".into()),
+            ProgramAction::Write("/var/dir/data".into()),
+            ProgramAction::Remove("/var/dir/data".into()),
         ];
         let candidates = resolve(&opts, &actions, &hardening_opts);
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].to_string(), "PrivateTmp=true");
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates[0].to_string(), "ReadOnlyPaths=-/");
+        assert_eq!(candidates[1].to_string(), "ReadWritePaths=-/var/dir");
+        assert_eq!(candidates[2].to_string(), "PrivateMounts=true");
+    }
+
+    #[test]
+    fn resolve_inaccessible_paths_remove() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let (opts, hardening_opts) = test_options_strict(&["InaccessiblePaths"]);
+
+        let remove = ProgramAction::Remove("/var/dir/data".into());
+        for actions in [
+            vec![remove.clone()],
+            vec![ProgramAction::Write("/var/dir/data".into()), remove],
+        ] {
+            let candidates = resolve(&opts, &actions, &hardening_opts);
+            assert_eq!(candidates.len(), 3);
+            assert_eq!(candidates[0].to_string(), "TemporaryFileSystem=/:ro");
+            assert_eq!(candidates[1].to_string(), "BindPaths=-/var/dir");
+            assert_eq!(candidates[2].to_string(), "PrivateMounts=true");
+        }
+    }
+
+    #[test]
+    fn resolve_read_only_paths_symlink_write() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let (opts, hardening_opts) = test_options_strict(&["ReadOnlyPaths"]);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let link = temp_dir.path().join("link");
+        unix::fs::symlink("/nonexistent", &link).unwrap();
+        let actions = vec![ProgramAction::Write(link)];
+        let candidates = resolve(&opts, &actions, &hardening_opts);
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates[0].to_string(), "ReadOnlyPaths=-/");
+        assert_eq!(
+            candidates[1].to_string(),
+            format!("ReadWritePaths=-{}", temp_dir.path().to_str().unwrap())
+        );
+        assert_eq!(candidates[2].to_string(), "PrivateMounts=true");
     }
 
     #[test]

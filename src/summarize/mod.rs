@@ -21,11 +21,10 @@ use crate::{
 mod handlers;
 
 use handlers::{
-    ChdirHandler, Clone3Handler, EpollCtlHandler, ExecHandler, ForkHandler, KillHandler,
-    MemfdCreateHandler, MkdirHandler, MknodHandler, MmapHandler, MountHandler, NetworkHandler,
-    OpenHandler, RenameHandler, SetSchedulerHandler, SetsockoptHandler, ShmCtlHandler,
-    SocketHandler, StatFdHandler, StatPathHandler, SyscallHandler, TimerCreateHandler,
-    UnshareHandler,
+    ChdirHandler, Clone3Handler, EpollCtlHandler, ExecHandler, FollowSymlink, ForkHandler,
+    KillHandler, MemfdCreateHandler, MknodHandler, MmapHandler, MountHandler, NetworkHandler,
+    OpenHandler, PathHandler, RenameHandler, SetSchedulerHandler, SetsockoptHandler, ShmCtlHandler,
+    SocketHandler, StatFdHandler, SyscallHandler, TimerCreateHandler, UnshareHandler,
 };
 
 /// A high level program runtime action
@@ -50,6 +49,8 @@ pub(crate) enum ProgramAction {
     NetworkActivity(Box<NetworkActivity>),
     /// Path was accessed (open, stat'ed, read...)
     Read(PathBuf),
+    /// Path was removed
+    Remove(PathBuf),
     /// Set privileged timer alarm
     SetAlarm,
     /// Set scheduler to a real time one
@@ -58,7 +59,7 @@ pub(crate) enum ProgramAction {
     Syscalls(HashSet<SyscallName>),
     /// Inhibit suspend
     Wakeup,
-    /// Path was written to (data, metadata, path removal...)
+    /// Path was written to (data, metadata...)
     Write(PathBuf),
     /// Memory mapping with write and execute bits, or execute bit added
     /// after initial mapping
@@ -284,6 +285,24 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
                 path: FdOrPath::Path(0),
             }),
         );
+        m.insert(
+            "chmod",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "chown",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Write,
+            }),
+        );
         // Note: strace decodes clone's arguments as a struct, like clone3
         m.insert("clone", Box::new(Clone3Handler { args: 0 }));
         m.insert("clone3", Box::new(Clone3Handler { args: 0 }));
@@ -309,30 +328,99 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
                 path: FdOrPath::Fd(0),
             }),
         );
+        m.insert(
+            "fchmodat",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "fchmodat2",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::UnlessNoFollowFlag(3),
+                action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "fchownat",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::UnlessNoFollowFlag(4),
+                action: ProgramAction::Write,
+            }),
+        );
         m.insert("fork", Box::new(ForkHandler));
         m.insert("fstat", Box::new(StatFdHandler { fd: 0 }));
+        m.insert(
+            "futimesat",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Write,
+            }),
+        );
         m.insert("getdents", Box::new(StatFdHandler { fd: 0 }));
         m.insert("kill", Box::new(KillHandler { pid: 0, sig: 1 }));
         m.insert(
-            "lstat",
-            Box::new(StatPathHandler {
+            "lchown",
+            Box::new(PathHandler {
                 relfd: None,
                 path: 0,
+                follow: FollowSymlink::Never,
+                action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "lremovexattr",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Never,
+                action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "lsetxattr",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Never,
+                action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "lstat",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Read,
             }),
         );
         m.insert("memfd_create", Box::new(MemfdCreateHandler { flags: 1 }));
         m.insert(
             "mkdir",
-            Box::new(MkdirHandler {
+            Box::new(PathHandler {
                 relfd: None,
                 path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Create,
             }),
         );
         m.insert(
             "mkdirat",
-            Box::new(MkdirHandler {
+            Box::new(PathHandler {
                 relfd: Some(0),
                 path: 1,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Create,
             }),
         );
         m.insert(
@@ -376,9 +464,11 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
         );
         m.insert(
             "newfstatat",
-            Box::new(StatPathHandler {
+            Box::new(PathHandler {
                 relfd: Some(0),
                 path: 1,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Read,
             }),
         );
         m.insert(
@@ -406,6 +496,15 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             }),
         );
         m.insert("recvfrom", Box::new(NetworkHandler { fd: 0, sockaddr: 4 }));
+        m.insert(
+            "removexattr",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Write,
+            }),
+        );
         m.insert(
             "rename",
             Box::new(RenameHandler {
@@ -437,6 +536,15 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             }),
         );
         m.insert(
+            "rmdir",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Never,
+                action: ProgramAction::Remove,
+            }),
+        );
+        m.insert(
             "sched_setscheduler",
             Box::new(SetSchedulerHandler { policy: 1 }),
         );
@@ -450,17 +558,82 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
                 optval: 3,
             }),
         );
+        m.insert(
+            "setxattr",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Write,
+            }),
+        );
         m.insert("shmctl", Box::new(ShmCtlHandler { op: 1 }));
         m.insert("socket", Box::new(SocketHandler { af: 0, flags: 1 }));
         m.insert(
             "stat",
-            Box::new(StatPathHandler {
+            Box::new(PathHandler {
                 relfd: None,
                 path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Read,
             }),
         );
         m.insert("timer_create", Box::new(TimerCreateHandler { clockid: 0 }));
+        m.insert(
+            "truncate",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "unlink",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Never,
+                action: ProgramAction::Remove,
+            }),
+        );
+        m.insert(
+            "unlinkat",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::Never,
+                action: ProgramAction::Remove,
+            }),
+        );
         m.insert("unshare", Box::new(UnshareHandler { flags: 0 }));
+        m.insert(
+            "utime",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "utimensat",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::UnlessNoFollowFlag(3),
+                action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "utimes",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Write,
+            }),
+        );
         m.insert("vfork", Box::new(ForkHandler));
         m
     });
@@ -652,9 +825,15 @@ pub(crate) fn program_state() -> ProgramState {
 #[expect(clippy::unreadable_literal)]
 #[cfg(test)]
 mod tests {
-    use std::os::unix::ffi::OsStrExt as _;
+    use std::{
+        fs::{self, File},
+        os::unix::{self, ffi::OsStrExt as _},
+    };
 
-    use super::*;
+    use super::{
+        handlers::tests::{buf_expr, int_literal, make_syscall, named_symbol},
+        *,
+    };
     use crate::strace::*;
 
     #[test]
@@ -922,6 +1101,219 @@ mod tests {
             vec![ProgramAction::Syscalls(
                 ["fstat".into()].into_iter().collect()
             )]
+        );
+    }
+
+    fn syscall(name: &str, args: Vec<Expression>) -> SyscallItem {
+        SyscallItem::Complete(Box::new(make_syscall(name, args, 0)))
+    }
+
+    #[test]
+    fn unlink_removes_path() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let state = program_state();
+
+        let syscalls = [Ok(syscall("unlink", vec![buf_expr(b"/var/lib/test")]))];
+        assert_eq!(
+            summarize(syscalls, &[], state).unwrap(),
+            vec![
+                ProgramAction::Remove("/var/lib/test".into()),
+                ProgramAction::Syscalls(["unlink".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn utimensat_null_path_writes_fd_path() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let state = program_state();
+
+        // glibc's futimens(fd, times)
+        let fd = Expression::Integer(IntegerExpression {
+            value: IntegerExpressionValue::Literal(3),
+            metadata: Some("/var/lib/test".as_bytes().to_vec()),
+        });
+        let syscalls = [Ok(syscall(
+            "utimensat",
+            vec![
+                fd,
+                named_symbol("NULL"),
+                named_symbol("NULL"),
+                int_literal(0),
+            ],
+        ))];
+        assert_eq!(
+            summarize(syscalls, &[], state).unwrap(),
+            vec![
+                ProgramAction::Write("/var/lib/test".into()),
+                ProgramAction::Syscalls(["utimensat".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn write_symlink_follow() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let state = program_state();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let target = temp_dir.path().join("target");
+        let link = temp_dir.path().join("link");
+        File::create(&target).unwrap();
+        unix::fs::symlink(&target, &link).unwrap();
+        let target_dir = temp_dir.path().join("target_dir");
+        let link_dir = temp_dir.path().join("link_dir");
+        fs::create_dir(&target_dir).unwrap();
+        unix::fs::symlink(&target_dir, &link_dir).unwrap();
+        let link_str = link.to_str().unwrap();
+        let syscalls = [
+            Ok(syscall(
+                "utimensat",
+                vec![
+                    named_symbol("AT_FDCWD"),
+                    buf_expr(link_str.as_bytes()),
+                    named_symbol("NULL"),
+                    named_symbol("AT_SYMLINK_NOFOLLOW"),
+                ],
+            )),
+            Ok(syscall(
+                "chmod",
+                vec![buf_expr(link_str.as_bytes()), int_literal(0o644)],
+            )),
+            Ok(syscall("unlink", vec![buf_expr(link_str.as_bytes())])),
+            // A trailing slash follows the symlink despite AT_SYMLINK_NOFOLLOW
+            Ok(syscall(
+                "utimensat",
+                vec![
+                    named_symbol("AT_FDCWD"),
+                    buf_expr(format!("{}/", link_dir.to_str().unwrap()).as_bytes()),
+                    named_symbol("NULL"),
+                    named_symbol("AT_SYMLINK_NOFOLLOW"),
+                ],
+            )),
+            Ok(syscall(
+                "unlink",
+                vec![buf_expr(link_dir.join("file").as_os_str().as_bytes())],
+            )),
+        ];
+        assert_eq!(
+            summarize(syscalls, &[], state).unwrap(),
+            vec![
+                ProgramAction::Write(link.clone()),
+                ProgramAction::Read(link.clone()),
+                ProgramAction::Write(target),
+                ProgramAction::Remove(link),
+                ProgramAction::Read(link_dir.clone()),
+                ProgramAction::Write(target_dir.clone()),
+                ProgramAction::Read(link_dir),
+                ProgramAction::Remove(target_dir.join("file")),
+                ProgramAction::Syscalls(
+                    ["chmod".into(), "unlink".into(), "utimensat".into()].into()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn write_fd_symlink_no_follow() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let state = program_state();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let target = temp_dir.path().join("target");
+        let link = temp_dir.path().join("link");
+        File::create(&target).unwrap();
+        unix::fs::symlink(&target, &link).unwrap();
+        // O_PATH|O_NOFOLLOW descriptor of the symlink
+        let fd = Expression::Integer(IntegerExpression {
+            value: IntegerExpressionValue::Literal(3),
+            metadata: Some(link.as_os_str().as_bytes().to_vec()),
+        });
+        let syscalls = [Ok(syscall(
+            "fchownat",
+            vec![
+                fd,
+                buf_expr(b""),
+                int_literal(0),
+                int_literal(0),
+                named_symbol("AT_EMPTY_PATH"),
+            ],
+        ))];
+        assert_eq!(
+            summarize(syscalls, &[], state).unwrap(),
+            vec![
+                ProgramAction::Write(link),
+                ProgramAction::Syscalls(["fchownat".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn write_at_symlink_no_follow_flag() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let target = temp_dir.path().join("target");
+        let link = temp_dir.path().join("link");
+        File::create(&target).unwrap();
+        unix::fs::symlink(&target, &link).unwrap();
+        let dir_fd = Expression::Integer(IntegerExpression {
+            value: IntegerExpressionValue::Literal(3),
+            metadata: Some(temp_dir.path().as_os_str().as_bytes().to_vec()),
+        });
+        for (name, args) in [
+            (
+                "fchmodat2",
+                vec![
+                    dir_fd.clone(),
+                    buf_expr(b"link"),
+                    int_literal(0o644),
+                    named_symbol("AT_SYMLINK_NOFOLLOW"),
+                ],
+            ),
+            (
+                "fchownat",
+                vec![
+                    dir_fd.clone(),
+                    buf_expr(b"link"),
+                    int_literal(0),
+                    int_literal(0),
+                    named_symbol("AT_SYMLINK_NOFOLLOW"),
+                ],
+            ),
+        ] {
+            assert_eq!(
+                summarize([Ok(syscall(name, args))], &[], program_state()).unwrap(),
+                vec![
+                    ProgramAction::Write(link.clone()),
+                    ProgramAction::Syscalls([name.into()].into()),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn utimensat_null_path_closed_fd() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let state = program_state();
+
+        let syscalls = [Ok(syscall(
+            "utimensat",
+            vec![
+                int_literal(3),
+                named_symbol("NULL"),
+                named_symbol("NULL"),
+                int_literal(0),
+            ],
+        ))];
+        assert_eq!(
+            summarize(syscalls, &[], state).unwrap(),
+            vec![ProgramAction::Syscalls(["utimensat".into()].into())]
         );
     }
 }

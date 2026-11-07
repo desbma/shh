@@ -534,4 +534,19 @@ ptrace(PTRACE_DETACH, target_pid)
         ];
         profile_and_run(&cmd, false);
     }
+
+    #[test]
+    fn systemd_run_rm() {
+        // Remove a pre-existing file, a write to its directory
+        let path = format!("/var/lib/shh-test-{}", rand::random::<u16>());
+        let cmd = ["rm", &path];
+        for shh_opts in &*ALL_SHH_RUN_OPTS {
+            eprintln!("shh run option: {}", shh_opts.join(" "));
+            fs::write(&path, "").unwrap();
+            let sd_opts = generate_options(&cmd, shh_opts);
+            fs::write(&path, "").unwrap();
+            let _ = systemd_run(&cmd, &sd_opts, false);
+            let _ = fs::remove_file(&path);
+        }
+    }
 }
