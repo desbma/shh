@@ -549,4 +549,19 @@ ptrace(PTRACE_DETACH, target_pid)
             let _ = fs::remove_file(&path);
         }
     }
+
+    #[test]
+    fn systemd_run_symlink() {
+        // Create a symlink, a write to its directory
+        let temp_dir = tempfile::tempdir_in("/var/lib").unwrap();
+        let path = temp_dir.path().join("link");
+        let cmd = ["ln", "-s", "/dev/null", path.to_str().unwrap()];
+        for shh_opts in &*ALL_SHH_RUN_OPTS {
+            eprintln!("shh run option: {}", shh_opts.join(" "));
+            let sd_opts = generate_options(&cmd, shh_opts);
+            fs::remove_file(&path).unwrap();
+            let _ = systemd_run(&cmd, &sd_opts, false);
+            fs::remove_file(&path).unwrap();
+        }
+    }
 }

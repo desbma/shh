@@ -1159,9 +1159,11 @@ impl SyscallHandler for TimerCreateHandler {
 /// Whether a path syscall acts on the target of the path's last component when it is a symlink
 pub(crate) enum FollowSymlink {
     Always,
-    Never,
-    /// Unless `AT_SYMLINK_NOFOLLOW` is set in the flags argument at this index
+    /// Only when the path ends with a slash
+    OnTrailingSlash,
+    /// Unless `AT_SYMLINK_NOFOLLOW` is set in the flags argument at this index, and the path does not end with a slash
     UnlessNoFollowFlag(usize),
+    Never,
 }
 
 /// Handle syscalls acting on a path possibly relative to a file descriptor
@@ -1200,20 +1202,22 @@ impl SyscallHandler for PathHandler {
             }
             other => return Err(err_expr_type!(other)),
         };
+        let path_bytes = path.as_os_str().as_bytes();
+        let trailing_slash = path_bytes.ends_with(b"/");
         let follow = match self.follow {
             FollowSymlink::Always => true,
-            FollowSymlink::Never => false,
+            FollowSymlink::OnTrailingSlash => trailing_slash,
             FollowSymlink::UnlessNoFollowFlag(flags) => {
                 let flags = unpack_expr!(
                     flags.extract(sc)?,
                     Expression::Integer(IntegerExpression { value, .. }) => value
                 );
-                !flags.is_flag_set("AT_SYMLINK_NOFOLLOW")
+                trailing_slash || !flags.is_flag_set("AT_SYMLINK_NOFOLLOW")
             }
+            FollowSymlink::Never => false,
         };
-        let path_bytes = path.as_os_str().as_bytes();
-        // A trailing slash or `.` component makes the kernel follow the last component
-        let follow = follow || path_bytes.ends_with(b"/") || path_bytes.ends_with(b"/.");
+        // A trailing `.` component makes the kernel follow the component before it
+        let follow = follow || path_bytes.ends_with(b"/.");
         // A descriptor path is already resolved, and may designate a symlink itself
         let traverse = !path_bytes.is_empty();
 
@@ -1225,7 +1229,17 @@ impl SyscallHandler for PathHandler {
                     traverse_parent_symlinks(&mut path, actions);
                 }
             }
-            actions.push((self.action)(path));
+            // An entry creation or removal failing on an existing symlink, like a creation with EEXIST,
+            // wrote nothing but depends on it
+            let action = if matches!(self.follow, FollowSymlink::Never)
+                && sc.ret_val.as_ref().and_then(IntegerExpression::value) == Some(-1)
+                && path.is_symlink()
+            {
+                ProgramAction::Read
+            } else {
+                self.action
+            };
+            actions.push(action(path));
         }
         Ok(())
     }
@@ -1901,7 +1915,7 @@ x86_Thread_features_locked:
         let handler = PathHandler {
             relfd: None,
             path: 0,
-            follow: FollowSymlink::Always,
+            follow: FollowSymlink::Never,
             action: ProgramAction::Create,
         };
         let sc = make_syscall("mkdir", vec![buf_expr(b"/tmp/newdir")], 0);
@@ -1918,7 +1932,7 @@ x86_Thread_features_locked:
         let handler = PathHandler {
             relfd: Some(0),
             path: 1,
-            follow: FollowSymlink::Always,
+            follow: FollowSymlink::Never,
             action: ProgramAction::Create,
         };
         let sc = make_syscall("mkdirat", vec![int_literal(3), buf_expr(b"subdir")], 0);
@@ -1935,7 +1949,7 @@ x86_Thread_features_locked:
         let handler = PathHandler {
             relfd: None,
             path: 0,
-            follow: FollowSymlink::Always,
+            follow: FollowSymlink::Never,
             action: ProgramAction::Create,
         };
         let sc = make_syscall("mkdir", vec![int_literal(42)], 0);
