@@ -1163,6 +1163,8 @@ pub(crate) enum FollowSymlink {
     OnTrailingSlash,
     /// Unless `AT_SYMLINK_NOFOLLOW` is set in the flags argument at this index, and the path does not end with a slash
     UnlessNoFollowFlag(usize),
+    /// When `AT_SYMLINK_FOLLOW` is set in the flags argument at this index, or the path ends with a slash
+    IfFollowFlag(usize),
     Never,
 }
 
@@ -1214,6 +1216,13 @@ impl SyscallHandler for PathHandler {
                 );
                 trailing_slash || !flags.is_flag_set("AT_SYMLINK_NOFOLLOW")
             }
+            FollowSymlink::IfFollowFlag(flags) => {
+                let flags = unpack_expr!(
+                    flags.extract(sc)?,
+                    Expression::Integer(IntegerExpression { value, .. }) => value
+                );
+                trailing_slash || flags.is_flag_set("AT_SYMLINK_FOLLOW")
+            }
             FollowSymlink::Never => false,
         };
         // A trailing `.` component makes the kernel follow the component before it
@@ -1242,6 +1251,24 @@ impl SyscallHandler for PathHandler {
             actions.push(action(path));
         }
         Ok(())
+    }
+}
+
+/// Handle hard link creation syscalls
+pub(crate) struct LinkHandler {
+    pub old: PathHandler,
+    pub new: PathHandler,
+}
+
+impl SyscallHandler for LinkHandler {
+    fn handle(
+        &self,
+        sc: &Syscall,
+        actions: &mut Vec<ProgramAction>,
+        state: &mut ProgramState,
+    ) -> Result<(), HandlerError> {
+        self.old.handle(sc, actions, state)?;
+        self.new.handle(sc, actions, state)
     }
 }
 
@@ -1609,6 +1636,14 @@ x86_Thread_features_locked:
         Expression::Integer(IntegerExpression {
             value: IntegerExpressionValue::Literal(val),
             metadata: None,
+        })
+    }
+
+    // Helper to create a descriptor expression with path metadata
+    pub(crate) fn fd_expr(fd: i64, path: impl AsRef<OsStr>) -> Expression {
+        Expression::Integer(IntegerExpression {
+            value: IntegerExpressionValue::Literal(fd),
+            metadata: Some(path.as_ref().as_bytes().to_vec()),
         })
     }
 
@@ -3467,10 +3502,7 @@ x86_Thread_features_locked:
             pid: 1000,
             rel_ts: 0.0,
             name: "fstat".into(),
-            args: vec![Expression::Integer(IntegerExpression {
-                value: IntegerExpressionValue::Literal(3),
-                metadata: Some(b"/etc/passwd".to_vec()),
-            })],
+            args: vec![fd_expr(3, "/etc/passwd")],
             ret_val: Some(IntegerExpression {
                 value: IntegerExpressionValue::Literal(0),
                 metadata: None,
@@ -3800,10 +3832,7 @@ x86_Thread_features_locked:
     // fchdir(3) with fd metadata pointing to /var/log
     #[test]
     fn resolve_fchdir() {
-        let fd = Expression::Integer(IntegerExpression {
-            value: IntegerExpressionValue::Literal(3),
-            metadata: Some(b"/var/log".to_vec()),
-        });
+        let fd = fd_expr(3, "/var/log");
         let path = FdOrPath::Fd(&fd);
         assert_eq!(
             path.resolve(Path::new("/")).unwrap(),
@@ -3845,10 +3874,7 @@ x86_Thread_features_locked:
     // Fd with pipe pseudo metadata returns None
     #[test]
     fn resolve_fd_pseudo_metadata() {
-        let fd = Expression::Integer(IntegerExpression {
-            value: IntegerExpressionValue::Literal(3),
-            metadata: Some(b"pipe:[12345]".to_vec()),
-        });
+        let fd = fd_expr(3, "pipe:[12345]");
         let path = FdOrPath::Fd(&fd);
         assert_eq!(path.resolve(Path::new("/")).unwrap(), None);
     }

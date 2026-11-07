@@ -564,4 +564,20 @@ ptrace(PTRACE_DETACH, target_pid)
             fs::remove_file(&path).unwrap();
         }
     }
+
+    #[test]
+    fn systemd_run_ln_hard() {
+        // Hard link a pre-existing file, a read of the source, both directly in /tmp
+        let src = tempfile::NamedTempFile::new_in("/tmp").unwrap();
+        let dst = src.path().with_extension("dst");
+        let cmd = ["ln", src.path().to_str().unwrap(), dst.to_str().unwrap()];
+        // Whitelist mode still puts the link endpoints on different mounts, or makes /tmp read-only
+        for shh_opts in ALL_SHH_RUN_OPTS.iter().filter(|o| !o.contains(&"-w")) {
+            eprintln!("shh run option: {}", shh_opts.join(" "));
+            let sd_opts = generate_options(&cmd, shh_opts);
+            fs::remove_file(&dst).unwrap();
+            let _ = systemd_run(&cmd, &sd_opts, false);
+            fs::remove_file(&dst).unwrap();
+        }
+    }
 }

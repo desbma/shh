@@ -22,9 +22,10 @@ mod handlers;
 
 use handlers::{
     ChdirHandler, Clone3Handler, EpollCtlHandler, ExecHandler, FollowSymlink, ForkHandler,
-    KillHandler, MemfdCreateHandler, MknodHandler, MmapHandler, MountHandler, NetworkHandler,
-    OpenHandler, PathHandler, RenameHandler, SetSchedulerHandler, SetsockoptHandler, ShmCtlHandler,
-    SocketHandler, StatFdHandler, SyscallHandler, TimerCreateHandler, UnshareHandler,
+    KillHandler, LinkHandler, MemfdCreateHandler, MknodHandler, MmapHandler, MountHandler,
+    NetworkHandler, OpenHandler, PathHandler, RenameHandler, SetSchedulerHandler,
+    SetsockoptHandler, ShmCtlHandler, SocketHandler, StatFdHandler, SyscallHandler,
+    TimerCreateHandler, UnshareHandler,
 };
 
 /// A high level program runtime action
@@ -379,20 +380,36 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
         );
         m.insert(
             "link",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 1,
-                follow: FollowSymlink::Never,
-                action: ProgramAction::Create,
+            Box::new(LinkHandler {
+                old: PathHandler {
+                    relfd: None,
+                    path: 0,
+                    follow: FollowSymlink::OnTrailingSlash,
+                    action: ProgramAction::Read,
+                },
+                new: PathHandler {
+                    relfd: None,
+                    path: 1,
+                    follow: FollowSymlink::Never,
+                    action: ProgramAction::Create,
+                },
             }),
         );
         m.insert(
             "linkat",
-            Box::new(PathHandler {
-                relfd: Some(2),
-                path: 3,
-                follow: FollowSymlink::Never,
-                action: ProgramAction::Create,
+            Box::new(LinkHandler {
+                old: PathHandler {
+                    relfd: Some(0),
+                    path: 1,
+                    follow: FollowSymlink::IfFollowFlag(4),
+                    action: ProgramAction::Read,
+                },
+                new: PathHandler {
+                    relfd: Some(2),
+                    path: 3,
+                    follow: FollowSymlink::Never,
+                    action: ProgramAction::Create,
+                },
             }),
         );
         m.insert(
@@ -867,7 +884,7 @@ mod tests {
     };
 
     use super::{
-        handlers::tests::{buf_expr, int_literal, make_syscall, named_symbol},
+        handlers::tests::{buf_expr, fd_expr, int_literal, make_syscall, named_symbol},
         *,
     };
     use crate::strace::*;
@@ -944,10 +961,7 @@ mod tests {
             rel_ts: 0.000036,
             name: "connect".into(),
             args: vec![
-                Expression::Integer(IntegerExpression {
-                    value: IntegerExpressionValue::Literal(4),
-                    metadata: Some("/run/user/1000/systemd/private".as_bytes().to_vec()),
-                }),
+                fd_expr(4, "/run/user/1000/systemd/private"),
                 Expression::Struct(HashMap::from([
                     (
                         "sa_family".to_owned(),
@@ -1167,10 +1181,7 @@ mod tests {
         let state = program_state();
 
         // glibc's futimens(fd, times)
-        let fd = Expression::Integer(IntegerExpression {
-            value: IntegerExpressionValue::Literal(3),
-            metadata: Some("/var/lib/test".as_bytes().to_vec()),
-        });
+        let fd = fd_expr(3, "/var/lib/test");
         let syscalls = [Ok(syscall(
             "utimensat",
             vec![
@@ -1265,10 +1276,7 @@ mod tests {
         File::create(&target).unwrap();
         unix::fs::symlink(&target, &link).unwrap();
         // O_PATH|O_NOFOLLOW descriptor of the symlink
-        let fd = Expression::Integer(IntegerExpression {
-            value: IntegerExpressionValue::Literal(3),
-            metadata: Some(link.as_os_str().as_bytes().to_vec()),
-        });
+        let fd = fd_expr(3, &link);
         let syscalls = [Ok(syscall(
             "fchownat",
             vec![
@@ -1297,10 +1305,7 @@ mod tests {
         let link = temp_dir.path().join("link");
         File::create(&target).unwrap();
         unix::fs::symlink(&target, &link).unwrap();
-        let dir_fd = Expression::Integer(IntegerExpression {
-            value: IntegerExpressionValue::Literal(3),
-            metadata: Some(temp_dir.path().as_os_str().as_bytes().to_vec()),
-        });
+        let dir_fd = fd_expr(3, temp_dir.path());
         for (name, args) in [
             (
                 "fchmodat2",
@@ -1362,10 +1367,7 @@ mod tests {
         let link_dir = temp_dir.path().join("link_dir");
         fs::create_dir(&target_dir).unwrap();
         unix::fs::symlink(&target_dir, &link_dir).unwrap();
-        let dir_fd = Expression::Integer(IntegerExpression {
-            value: IntegerExpressionValue::Literal(3),
-            metadata: Some(temp_dir.path().as_os_str().as_bytes().to_vec()),
-        });
+        let dir_fd = fd_expr(3, temp_dir.path());
         let new = link_dir.join("new");
         let new_bytes = new.as_os_str().as_bytes();
         for (name, args) in [
@@ -1386,11 +1388,126 @@ mod tests {
                 vec![buf_expr(b"/src"), dir_fd.clone(), buf_expr(b"link_dir/new")],
             ),
         ] {
+            // A hard link also reads its source
+            let old = matches!(name, "link" | "linkat").then(|| ProgramAction::Read("/src".into()));
             assert_eq!(
                 summarize([Ok(syscall(name, args))], &[], program_state()).unwrap(),
+                old.into_iter()
+                    .chain([
+                        ProgramAction::Read(link_dir.clone()),
+                        ProgramAction::Create(target_dir.join("new")),
+                        ProgramAction::Syscalls([name.into()].into()),
+                    ])
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn link_reads_old_path() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let target = temp_dir.path().join("target");
+        let link = temp_dir.path().join("link");
+        File::create(&target).unwrap();
+        unix::fs::symlink(&target, &link).unwrap();
+        let dir_fd = fd_expr(3, temp_dir.path());
+        let target_fd = fd_expr(4, &target);
+        let new = temp_dir.path().join("new");
+        let linkat = |old_fd: &Expression, old: &[u8], flags| {
+            vec![
+                old_fd.clone(),
+                buf_expr(old),
+                named_symbol("AT_FDCWD"),
+                buf_expr(new.as_os_str().as_bytes()),
+                flags,
+            ]
+        };
+        for (name, args, old_actions) in [
+            (
+                "link",
+                vec![
+                    buf_expr(link.as_os_str().as_bytes()),
+                    buf_expr(new.as_os_str().as_bytes()),
+                ],
+                vec![ProgramAction::Read(link.clone())],
+            ),
+            (
+                "linkat",
+                linkat(&dir_fd, b"link", int_literal(0)),
+                vec![ProgramAction::Read(link.clone())],
+            ),
+            (
+                "linkat",
+                linkat(&dir_fd, b"link", named_symbol("AT_SYMLINK_FOLLOW")),
+                vec![
+                    ProgramAction::Read(link.clone()),
+                    ProgramAction::Read(target.clone()),
+                ],
+            ),
+            (
+                "linkat",
+                linkat(&target_fd, b"", named_symbol("AT_EMPTY_PATH")),
+                vec![ProgramAction::Read(target.clone())],
+            ),
+        ] {
+            let mut expected = old_actions;
+            expected.extend([
+                ProgramAction::Create(new.clone()),
+                ProgramAction::Syscalls([name.into()].into()),
+            ]);
+            assert_eq!(
+                summarize([Ok(syscall(name, args))], &[], program_state()).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn link_trailing_slash_follows_old_path() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let target_dir = temp_dir.path().join("target_dir");
+        let link_dir = temp_dir.path().join("link_dir");
+        let existing = temp_dir.path().join("existing");
+        fs::create_dir(&target_dir).unwrap();
+        unix::fs::symlink(&target_dir, &link_dir).unwrap();
+        unix::fs::symlink(temp_dir.path().join("missing"), &existing).unwrap();
+        let dir_fd = fd_expr(3, temp_dir.path());
+        // Failing with EEXIST, which the parser keeps, as hard linking a directory never succeeds
+        for (name, args) in [
+            (
+                "link",
+                vec![
+                    buf_expr(&[link_dir.as_os_str().as_bytes(), b"/"].concat()),
+                    buf_expr(existing.as_os_str().as_bytes()),
+                ],
+            ),
+            (
+                "linkat",
+                vec![
+                    dir_fd.clone(),
+                    buf_expr(b"link_dir/"),
+                    dir_fd,
+                    buf_expr(b"existing"),
+                    int_literal(0),
+                ],
+            ),
+        ] {
+            let sc = make_syscall(name, args, -1);
+            assert_eq!(
+                summarize(
+                    [Ok(SyscallItem::Complete(Box::new(sc)))],
+                    &[],
+                    program_state()
+                )
+                .unwrap(),
                 vec![
                     ProgramAction::Read(link_dir.clone()),
-                    ProgramAction::Create(target_dir.join("new")),
+                    ProgramAction::Read(target_dir.clone()),
+                    ProgramAction::Read(existing.clone()),
                     ProgramAction::Syscalls([name.into()].into()),
                 ]
             );
@@ -1404,10 +1521,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let link = temp_dir.path().join("link");
         unix::fs::symlink(temp_dir.path().join("missing"), &link).unwrap();
-        let dir_fd = Expression::Integer(IntegerExpression {
-            value: IntegerExpressionValue::Literal(3),
-            metadata: Some(temp_dir.path().as_os_str().as_bytes().to_vec()),
-        });
+        let dir_fd = fd_expr(3, temp_dir.path());
         // The entry a successful call creates is a symlink when handled if the call made one, or if one
         // replaced it since
         for (name, args) in [
@@ -1443,12 +1557,16 @@ mod tests {
                 vec![dir_fd.clone(), buf_expr(b"link/"), int_literal(0o755)],
             ),
         ] {
+            // A hard link also reads its source
+            let old = matches!(name, "link" | "linkat").then(|| ProgramAction::Read("/src".into()));
             assert_eq!(
                 summarize([Ok(syscall(name, args))], &[], program_state()).unwrap(),
-                vec![
-                    ProgramAction::Create(link.clone()),
-                    ProgramAction::Syscalls([name.into()].into()),
-                ]
+                old.into_iter()
+                    .chain([
+                        ProgramAction::Create(link.clone()),
+                        ProgramAction::Syscalls([name.into()].into()),
+                    ])
+                    .collect::<Vec<_>>()
             );
         }
     }
