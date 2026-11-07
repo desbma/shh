@@ -1,12 +1,16 @@
 //! Resolver code that finds options compatible with program actions
 
-use std::path::PathBuf;
+use std::{
+    collections::HashSet,
+    num::NonZeroUsize,
+    path::{Path, PathBuf},
+};
 
 use itertools::Itertools as _;
 
 use super::{
     ListOptionValue,
-    options::{OptionUpdater, merge_similar_paths},
+    options::{MergeConstraints, OptionUpdater, PathMount, merge_similar_paths},
 };
 use crate::{
     cl::HardeningOptions,
@@ -260,10 +264,10 @@ fn actions_compatible_list(
         let mut new_list_desc = Box::new(ChangedOptionValueDescription {
             new_options: vec![OptionWithValue {
                 name: opt_name,
-                value: OptionValue::List(ListOptionValue {
+                value: OptionValue::List(Box::new(ListOptionValue {
                     values: enabled_list_vals,
                     ..list.to_owned()
-                }),
+                })),
             }],
             effect: OptionValueEffect::Multiple(enabled_list_val_effects),
         });
@@ -278,6 +282,47 @@ fn actions_compatible_list(
         ActionOptionEffectCompatibility::CompatibleIfChanged(changed_desc)
     } else {
         ActionOptionEffectCompatibility::Compatible
+    }
+}
+
+/// Collect the values of the path lists with a given mount
+fn mount_paths(opts: &[OptionWithValue<&'static str>], mount: PathMount) -> HashSet<PathBuf> {
+    opts.iter()
+        .filter_map(|o| match &o.value {
+            OptionValue::List(list) if list.paths == Some(mount) => Some(&list.values),
+            _ => None,
+        })
+        .flatten()
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// Merge similar paths in the lists with a given mount, never into a forbidden path
+fn merge_mount_paths(
+    opts: &mut [OptionWithValue<&'static str>],
+    mount: PathMount,
+    threshold: NonZeroUsize,
+    forbidden: &HashSet<PathBuf>,
+) {
+    for option in opts {
+        if let OptionValue::List(list) = &mut option.value
+            && list.paths == Some(mount)
+        {
+            list.values = merge_similar_paths(
+                list.values
+                    .iter()
+                    .map(PathBuf::from)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                Some(MergeConstraints {
+                    threshold,
+                    forbidden,
+                }),
+            )
+            .into_iter()
+            .filter_map(|p| p.to_str().map(ToOwned::to_owned))
+            .collect();
+        }
     }
 }
 
@@ -345,31 +390,49 @@ pub(crate) fn resolve(
         }
     }
 
-    // Merge paths in compatible options, post option merging
-    for option in &mut resolved_opts {
-        if let OptionValue::List(ListOptionValue {
-            values,
-            mergeable_paths: true,
-            ..
-        }) = &mut option.value
-        {
-            // Note: this can simplify paths to a point where that negates another option, for example:
-            // TemporaryFileSystem=/dev:ro
-            // BindReadOnlyPaths=/dev
-            // but at this point we lost the logical link between the two
-            *values = merge_similar_paths(
-                values
-                    .iter()
-                    .map(PathBuf::from)
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-                Some(hardening_opts.merge_paths_threshold),
-            )
-            .into_iter()
-            .filter_map(|p| p.to_str().map(ToOwned::to_owned))
-            .collect();
-        }
-    }
+    // Merge paths in compatible options, post option merging.
+    // A path is read-only when a read-only path sits between it and its closest writable ancestor (both included),
+    // so writable paths are merged first, never into the ancestors of a read-only path with a writable path below,
+    // then read-only paths, never between a writable path and its closest merged writable ancestor.
+    // Note: this can still simplify paths to a point where that negates another option of the same mount kind, for
+    // example:
+    // TemporaryFileSystem=/dev:ro
+    // BindReadOnlyPaths=/dev
+    let threshold = hardening_opts.merge_paths_threshold;
+    let ro_paths = mount_paths(&resolved_opts, PathMount::ReadOnly);
+    let rw_paths = mount_paths(&resolved_opts, PathMount::Writable);
+    let rw_forbidden = ro_paths
+        .iter()
+        .filter(|ro| rw_paths.iter().any(|rw| rw.starts_with(ro)))
+        .flat_map(|ro| ro.ancestors().map(Path::to_path_buf))
+        .collect();
+    merge_mount_paths(
+        &mut resolved_opts,
+        PathMount::Writable,
+        threshold,
+        &rw_forbidden,
+    );
+    let merged_rw_paths = mount_paths(&resolved_opts, PathMount::Writable);
+    let ro_forbidden = rw_paths
+        .iter()
+        .flat_map(|rw| {
+            rw.ancestors()
+                .take_while_inclusive(|p| !merged_rw_paths.contains(*p))
+                .map(Path::to_path_buf)
+        })
+        .collect();
+    merge_mount_paths(
+        &mut resolved_opts,
+        PathMount::ReadOnly,
+        threshold,
+        &ro_forbidden,
+    );
+    merge_mount_paths(
+        &mut resolved_opts,
+        PathMount::Other,
+        threshold,
+        &HashSet::new(),
+    );
 
     // Deduplicate
     resolved_opts.into_iter().unique().collect()
@@ -378,7 +441,7 @@ pub(crate) fn resolve(
 #[expect(clippy::shadow_unrelated)]
 #[cfg(test)]
 mod tests {
-    use std::{net::IpAddr, os::unix, slice};
+    use std::{net::IpAddr, num::NonZeroUsize, os::unix, slice};
 
     use super::*;
     use crate::{
@@ -762,6 +825,196 @@ mod tests {
         );
         assert_eq!(candidates[2].to_string(), "BindPaths=-/var/data");
         assert_eq!(candidates[3].to_string(), "PrivateMounts=true");
+    }
+
+    /// Resolve the named options with a merge threshold of 2, and return them except the host dependent
+    /// `InaccessiblePaths`
+    fn resolve_merged_paths(names: &[&str], actions: &[ProgramAction]) -> Vec<String> {
+        let (opts, hardening_opts) = test_options_strict(names);
+        let hardening_opts = HardeningOptions {
+            merge_paths_threshold: NonZeroUsize::new(2).unwrap(),
+            ..hardening_opts
+        };
+        resolve(&opts, actions, &hardening_opts)
+            .iter()
+            .filter(|o| o.name != "InaccessiblePaths")
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn resolve_merge_paths_ro_exception_writable_base() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let actions = [
+            ProgramAction::Read("/".into()),
+            ProgramAction::Read("/etc/a".into()),
+            ProgramAction::Read("/etc/b".into()),
+            ProgramAction::Read("/usr/c".into()),
+            ProgramAction::Read("/tmp/src".into()),
+            ProgramAction::Create("/tmp/dst".into()),
+        ];
+        assert_eq!(
+            resolve_merged_paths(&["ReadOnlyPaths", "InaccessiblePaths"], &actions),
+            [
+                "ReadOnlyPaths=-/",
+                "ReadWritePaths=-/tmp",
+                "PrivateMounts=true",
+                "TemporaryFileSystem=/etc:ro /usr:ro",
+                "BindReadOnlyPaths=-/etc -/tmp/src -/usr",
+                "TemporaryFileSystem=/tmp",
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_merge_paths_rw_exceptions_ro_base() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let actions = [
+            ProgramAction::Read("/".into()),
+            ProgramAction::Create("/tmp/a/1/f".into()),
+            ProgramAction::Create("/tmp/a/2/f".into()),
+            ProgramAction::Create("/tmp/a/3/f".into()),
+            ProgramAction::Create("/tmp/b/1/f".into()),
+            ProgramAction::Create("/tmp/c/1/f".into()),
+        ];
+        assert_eq!(
+            resolve_merged_paths(&["ReadOnlyPaths", "InaccessiblePaths"], &actions),
+            [
+                "ReadOnlyPaths=-/",
+                "ReadWritePaths=-/tmp/a -/tmp/b -/tmp/c",
+                "PrivateMounts=true",
+                "TemporaryFileSystem=/tmp:ro",
+                "BindPaths=-/tmp/a -/tmp/b -/tmp/c",
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_merge_paths_rw_exceptions_ro_exception() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let actions = [
+            ProgramAction::Read("/".into()),
+            ProgramAction::Read("/tmp/d".into()),
+            ProgramAction::Create("/tmp/d/1/f".into()),
+            ProgramAction::Create("/tmp/d/2/f".into()),
+            ProgramAction::Create("/tmp/d/3/f".into()),
+        ];
+        assert_eq!(
+            resolve_merged_paths(&["ReadOnlyPaths", "InaccessiblePaths"], &actions),
+            [
+                "ReadOnlyPaths=-/",
+                "ReadWritePaths=-/tmp/d/1 -/tmp/d/2 -/tmp/d/3",
+                "PrivateMounts=true",
+                "TemporaryFileSystem=/tmp:ro",
+                "BindReadOnlyPaths=-/tmp/d",
+                "BindPaths=-/tmp/d/1 -/tmp/d/2 -/tmp/d/3",
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_merge_paths_rw_exceptions_ro_exception_ancestor() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let actions = [
+            ProgramAction::Read("/".into()),
+            ProgramAction::Read("/tmp/d".into()),
+            ProgramAction::Create("/tmp/f".into()),
+            ProgramAction::Create("/tmp/d/1/f".into()),
+            ProgramAction::Create("/tmp/e/1/f".into()),
+            ProgramAction::Create("/tmp/e/2/f".into()),
+            ProgramAction::Create("/tmp/g/1/f".into()),
+        ];
+        assert_eq!(
+            resolve_merged_paths(&["ReadOnlyPaths", "InaccessiblePaths"], &actions),
+            [
+                "ReadOnlyPaths=-/",
+                "ReadWritePaths=-/tmp",
+                "PrivateMounts=true",
+                "TemporaryFileSystem=/tmp",
+                "BindReadOnlyPaths=-/tmp/d",
+                "BindPaths=-/tmp/d/1 -/tmp/e -/tmp/g",
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_merge_paths_ro_exceptions_under_merged_rw_exceptions() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let actions = [
+            ProgramAction::Read("/".into()),
+            ProgramAction::Read("/tmp/d/x".into()),
+            ProgramAction::Create("/tmp/f".into()),
+            ProgramAction::Read("/tmp/d/y".into()),
+            ProgramAction::Read("/tmp/d/z".into()),
+            ProgramAction::Create("/tmp/d/1/f".into()),
+            ProgramAction::Create("/tmp/e/1/f".into()),
+            ProgramAction::Create("/tmp/e/2/f".into()),
+            ProgramAction::Create("/tmp/g/1/f".into()),
+        ];
+        assert_eq!(
+            resolve_merged_paths(&["ReadOnlyPaths", "InaccessiblePaths"], &actions),
+            [
+                "ReadOnlyPaths=-/",
+                "ReadWritePaths=-/tmp",
+                "PrivateMounts=true",
+                "TemporaryFileSystem=/tmp",
+                "BindReadOnlyPaths=-/tmp/d/x -/tmp/d/y -/tmp/d/z",
+                "BindPaths=-/tmp",
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_merge_paths_ro_exceptions_above_merged_rw_exceptions() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let actions = [
+            ProgramAction::Read("/".into()),
+            ProgramAction::Read("/tmp/s/a".into()),
+            ProgramAction::Read("/tmp/s/b".into()),
+            ProgramAction::Read("/tmp/s/c".into()),
+            ProgramAction::Create("/tmp/s/d/1/f".into()),
+            ProgramAction::Create("/tmp/s/d/2/f".into()),
+            ProgramAction::Create("/tmp/s/d/3/f".into()),
+        ];
+        assert_eq!(
+            resolve_merged_paths(&["ReadOnlyPaths", "InaccessiblePaths"], &actions),
+            [
+                "ReadOnlyPaths=-/",
+                "ReadWritePaths=-/tmp/s/d",
+                "PrivateMounts=true",
+                "TemporaryFileSystem=/tmp:ro",
+                "BindReadOnlyPaths=-/tmp/s",
+                "BindPaths=-/tmp/s/d",
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_merge_paths_exec_exceptions() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let actions = [
+            ProgramAction::Exec("/usr/x/a".into()),
+            ProgramAction::Exec("/usr/x/b".into()),
+            ProgramAction::Exec("/usr/x/c".into()),
+            ProgramAction::Create("/usr/x/new".into()),
+        ];
+        assert_eq!(
+            resolve_merged_paths(&["ReadOnlyPaths", "NoExecPaths"], &actions),
+            [
+                "ReadOnlyPaths=-/",
+                "ReadWritePaths=-/usr/x",
+                "PrivateMounts=true",
+                "NoExecPaths=-/",
+                "ExecPaths=-/usr/x",
+            ]
+        );
     }
 
     #[test]

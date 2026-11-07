@@ -11,6 +11,8 @@ use std::{
     str::FromStr,
 };
 
+use itertools::Itertools as _;
+
 use crate::{
     cl::HardeningOptions,
     summarize::{NetworkActivity, ProgramAction},
@@ -58,19 +60,6 @@ impl OptionDescription {
             self.name, self.name
         )?;
         for opt_val in &self.possible_values {
-            if let OptionValue::List(list) = &opt_val.value {
-                writeln!(
-                    w,
-                    "{}- *dynamic {}{}*",
-                    MARKDOWN_IDENT,
-                    if list.mergeable_paths { "path " } else { "" },
-                    match list.mode {
-                        ListMode::BlackList => "blacklisting",
-                        ListMode::WhiteList => "whitelisting",
-                    }
-                )?;
-                break;
-            }
             match &opt_val.value {
                 OptionValue::Boolean(v) => {
                     writeln!(
@@ -81,10 +70,18 @@ impl OptionDescription {
                     )?;
                 }
                 OptionValue::String(v) => writeln!(w, "{MARKDOWN_IDENT}- `{v}`")?,
-                OptionValue::List(ListOptionValue { values, .. }) => {
-                    for val in values {
-                        writeln!(w, "{MARKDOWN_IDENT}- `{val}`")?;
-                    }
+                OptionValue::List(list) => {
+                    writeln!(
+                        w,
+                        "{}- *dynamic {}{}*",
+                        MARKDOWN_IDENT,
+                        if list.paths.is_some() { "path " } else { "" },
+                        match list.mode {
+                            ListMode::BlackList => "blacklisting",
+                            ListMode::WhiteList => "whitelisting",
+                        }
+                    )?;
+                    break;
                 }
             }
         }
@@ -129,7 +126,16 @@ pub(crate) enum ListMode {
 pub(crate) enum OptionValue {
     Boolean(bool), // In most case we only model the 'true' value, because false is no-op and the default
     String(String), // enum-like, or free string
-    List(ListOptionValue),
+    List(Box<ListOptionValue>),
+}
+
+/// Mount an option gives the paths of its list
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+pub(crate) enum PathMount {
+    ReadOnly,
+    Writable,
+    /// Neither read-only nor writable
+    Other,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -138,9 +144,27 @@ pub(crate) struct ListOptionValue {
     pub value_if_empty: Option<&'static str>,
     pub option_prefix: &'static str,
     pub elem_prefix: &'static str,
+    pub elem_suffix: &'static str,
     pub repeat_option: bool,
     pub mode: ListMode,
-    pub mergeable_paths: bool,
+    /// Mount given to the values, if they are paths
+    pub paths: Option<PathMount>,
+}
+
+impl OptionValue {
+    /// Build a list of paths, each ignored if missing
+    pub(crate) fn path_list(values: Vec<String>, mode: ListMode, mount: PathMount) -> Self {
+        Self::List(Box::new(ListOptionValue {
+            values,
+            value_if_empty: None,
+            option_prefix: "",
+            elem_prefix: "-",
+            elem_suffix: "",
+            repeat_option: false,
+            mode,
+            paths: Some(mount),
+        }))
+    }
 }
 
 impl FromStr for OptionValue {
@@ -466,35 +490,39 @@ impl<T: PartialEq> OptionWithValue<T> {
     pub(crate) fn merge(&mut self, other: &Self) -> bool {
         self.name == other.name
             && match (&mut self.value, &other.value) {
-                (
-                    OptionValue::List(ListOptionValue {
+                (OptionValue::List(list), OptionValue::List(olist)) => {
+                    let ListOptionValue {
                         values,
                         value_if_empty,
                         option_prefix,
                         elem_prefix,
+                        elem_suffix,
                         repeat_option,
                         mode,
-                        mergeable_paths,
-                    }),
-                    OptionValue::List(ListOptionValue {
+                        paths,
+                    } = &mut **list;
+                    let ListOptionValue {
                         values: ovalues,
                         value_if_empty: ovalue_if_empty,
                         option_prefix: ooption_prefix,
                         elem_prefix: oelem_prefix,
+                        elem_suffix: oelem_suffix,
                         repeat_option: orepeat_option,
                         mode: omode,
-                        mergeable_paths: omergeable_paths,
-                    }),
-                ) if value_if_empty == ovalue_if_empty
-                    && option_prefix == ooption_prefix
-                    && elem_prefix == oelem_prefix
-                    && repeat_option == orepeat_option
-                    && mode == omode
-                    && mergeable_paths == omergeable_paths =>
-                {
-                    values.extend(ovalues.iter().cloned());
-                    values.sort_unstable();
-                    true
+                        paths: opaths,
+                    } = &**olist;
+                    let mergeable = value_if_empty == ovalue_if_empty
+                        && option_prefix == ooption_prefix
+                        && elem_prefix == oelem_prefix
+                        && elem_suffix == oelem_suffix
+                        && repeat_option == orepeat_option
+                        && mode == omode
+                        && paths == opaths;
+                    if mergeable {
+                        values.extend(ovalues.iter().cloned());
+                        values.sort_unstable();
+                    }
+                    mergeable
                 }
                 _ => false,
             }
@@ -524,14 +552,16 @@ impl<T: fmt::Display> fmt::Display for OptionWithValue<T> {
                 write!(f, "{}={}", self.name, if *value { "true" } else { "false" })
             }
             OptionValue::String(value) => write!(f, "{}={}", self.name, value),
-            OptionValue::List(ListOptionValue {
-                values,
-                value_if_empty,
-                option_prefix,
-                elem_prefix,
-                repeat_option,
-                ..
-            }) => {
+            OptionValue::List(list) => {
+                let ListOptionValue {
+                    values,
+                    value_if_empty,
+                    option_prefix,
+                    elem_prefix,
+                    elem_suffix,
+                    repeat_option,
+                    ..
+                } = &**list;
                 if values.is_empty() {
                     write!(f, "{}=", self.name)?;
                     if let Some(value_if_empty) = value_if_empty {
@@ -539,26 +569,19 @@ impl<T: fmt::Display> fmt::Display for OptionWithValue<T> {
                     } else {
                         unreachable!()
                     }
-                } else if *repeat_option {
-                    for (i, value) in values.iter().enumerate() {
-                        write!(f, "{}={}{}{}", self.name, option_prefix, elem_prefix, value)?;
-                        if i < values.len() - 1 {
-                            writeln!(f)?;
-                        }
-                    }
-                    Ok(())
                 } else {
-                    write!(
-                        f,
-                        "{}={}{}",
-                        self.name,
-                        option_prefix,
-                        values
-                            .iter()
-                            .map(|v| format!("{elem_prefix}{v}"))
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    )
+                    let prefix = format!("{name}={option_prefix}", name = self.name);
+                    let separator = if *repeat_option {
+                        format!("\n{prefix}")
+                    } else {
+                        " ".to_owned()
+                    };
+                    let rendered = values
+                        .iter()
+                        .map(|v| format!("{elem_prefix}{v}{elem_suffix}"))
+                        .collect::<Vec<_>>()
+                        .join(&separator);
+                    write!(f, "{prefix}{rendered}")
                 }
             }
         }
@@ -568,24 +591,32 @@ impl<T: fmt::Display> fmt::Display for OptionWithValue<T> {
 // Syscall groups generated at build time
 include!(concat!(env!("OUT_DIR"), "/systemd_syscall_groups.rs"));
 
+/// Limits of a merge of paths into their common ancestors
+#[derive(Clone, Copy)]
+pub(crate) struct MergeConstraints<'a> {
+    /// Path count above which paths are merged
+    pub threshold: NonZeroUsize,
+    /// Paths that can not be a merge result
+    pub forbidden: &'a HashSet<PathBuf>,
+}
+
+/// Merge paths into common ancestors within constraints, or else drop paths below others
 pub(crate) fn merge_similar_paths(
     paths: &[PathBuf],
-    simplify_threshold: Option<NonZeroUsize>,
+    simplify: Option<MergeConstraints<'_>>,
 ) -> Vec<PathBuf> {
-    match simplify_threshold {
-        Some(simplify_threshold) if paths.len() > simplify_threshold.get() => {
+    match simplify {
+        Some(MergeConstraints {
+            threshold: simplify_threshold,
+            forbidden,
+        }) if paths.len() > simplify_threshold.get() => {
             let mut children: HashMap<PathBuf, HashSet<PathBuf>> = HashMap::new();
             for path in paths {
-                let ancestors: Vec<_> = path.ancestors().map(Path::to_path_buf).collect();
-                let mut parent: Option<PathBuf> = None;
-                for dir in ancestors.into_iter().rev() {
-                    if let Some(parent) = parent.as_ref() {
-                        children
-                            .entry(parent.to_owned())
-                            .or_default()
-                            .insert(dir.clone());
-                    }
-                    parent = Some(dir);
+                for (child, parent) in path.ancestors().tuple_windows() {
+                    children
+                        .entry(parent.to_path_buf())
+                        .or_default()
+                        .insert(child.to_path_buf());
                 }
             }
             let initial_candidates = vec![PathBuf::from("/")];
@@ -593,10 +624,18 @@ pub(crate) fn merge_similar_paths(
             loop {
                 let mut advancing = false;
                 let mut new_candidates = Vec::with_capacity(candidates.len());
-                for candidate in &candidates {
+                let mut to_expand: Vec<&PathBuf> = candidates.iter().collect();
+                while let Some(candidate) = to_expand.pop() {
                     match children.get(candidate) {
                         Some(candidate_children) if !paths.contains(candidate) => {
-                            new_candidates.extend(candidate_children.iter().cloned());
+                            for child in candidate_children {
+                                if forbidden.contains(child) {
+                                    // Replace a forbidden candidate with its children
+                                    to_expand.push(child);
+                                } else {
+                                    new_candidates.push(child.to_owned());
+                                }
+                            }
                             advancing |= !candidate_children.is_empty();
                         }
                         _ => {
@@ -733,7 +772,10 @@ mod tests {
                     PathBuf::from("/a/ab/ab3"),
                     PathBuf::from("/a/ab/ab4/abc")
                 ],
-                Some(NonZeroUsize::new(2).unwrap())
+                Some(MergeConstraints {
+                    threshold: NonZeroUsize::new(2).unwrap(),
+                    forbidden: &HashSet::new()
+                })
             ),
             vec![PathBuf::from("/a/ab")]
         );
@@ -744,7 +786,10 @@ mod tests {
                     PathBuf::from("/a2/ab/ab2"),
                     PathBuf::from("/a3/ab/ab3")
                 ],
-                Some(NonZeroUsize::new(2).unwrap())
+                Some(MergeConstraints {
+                    threshold: NonZeroUsize::new(2).unwrap(),
+                    forbidden: &HashSet::new()
+                })
             ),
             vec![
                 PathBuf::from("/a1/ab/ab1"),
@@ -759,7 +804,10 @@ mod tests {
                     PathBuf::from("/a/ab/ab2"),
                     PathBuf::from("/a/ac/ab3")
                 ],
-                Some(NonZeroUsize::new(2).unwrap())
+                Some(MergeConstraints {
+                    threshold: NonZeroUsize::new(2).unwrap(),
+                    forbidden: &HashSet::new()
+                })
             ),
             vec![PathBuf::from("/a")]
         );
@@ -770,7 +818,10 @@ mod tests {
                     PathBuf::from("/a/aa/ab2"),
                     PathBuf::from("/a/ab/ab3")
                 ],
-                Some(NonZeroUsize::new(2).unwrap())
+                Some(MergeConstraints {
+                    threshold: NonZeroUsize::new(2).unwrap(),
+                    forbidden: &HashSet::new()
+                })
             ),
             vec![PathBuf::from("/a/aa"), PathBuf::from("/a/ab")]
         );
@@ -783,9 +834,47 @@ mod tests {
                         PathBuf::from("/a/b/c"),
                         PathBuf::from("/d/b/c"),
                     ],
-                    Some(NonZeroUsize::new(threshold).unwrap())
+                    Some(MergeConstraints {
+                        threshold: NonZeroUsize::new(threshold).unwrap(),
+                        forbidden: &HashSet::new()
+                    })
                 ),
                 vec![PathBuf::from("/a"), PathBuf::from("/d/b/c")]
+            );
+        }
+    }
+
+    #[test]
+    fn merge_similar_paths_forbidden() {
+        let paths = [
+            PathBuf::from("/a/aa/1"),
+            PathBuf::from("/a/aa/2"),
+            PathBuf::from("/a/ab/1"),
+            PathBuf::from("/a/ab/2"),
+            PathBuf::from("/a/ac/1"),
+        ];
+        let threshold = NonZeroUsize::new(2).unwrap();
+        for (forbidden, expected) in [
+            (vec![], vec!["/a"]),
+            (vec!["/a"], vec!["/a/aa", "/a/ab", "/a/ac"]),
+            (
+                vec!["/a", "/a/ab"],
+                vec!["/a/aa", "/a/ab/1", "/a/ab/2", "/a/ac"],
+            ),
+            (
+                vec!["/a", "/a/ab", "/a/ab/1"],
+                vec!["/a/aa", "/a/ab/1", "/a/ab/2", "/a/ac"],
+            ),
+        ] {
+            assert_eq!(
+                merge_similar_paths(
+                    &paths,
+                    Some(MergeConstraints {
+                        threshold,
+                        forbidden: &forbidden.into_iter().map(PathBuf::from).collect()
+                    })
+                ),
+                expected.into_iter().map(PathBuf::from).collect::<Vec<_>>()
             );
         }
     }

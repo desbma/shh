@@ -8,6 +8,7 @@ mod tests {
         env,
         fs::{self, Permissions},
         io::{BufRead as _, Write as _},
+        iter,
         os::unix::fs::{FileTypeExt as _, PermissionsExt as _},
         process,
         sync::LazyLock,
@@ -578,6 +579,80 @@ ptrace(PTRACE_DETACH, target_pid)
             fs::remove_file(&dst).unwrap();
             let _ = systemd_run(&cmd, &sd_opts, false);
             fs::remove_file(&dst).unwrap();
+        }
+    }
+
+    #[test]
+    fn systemd_run_cp_tmp() {
+        // Copy a pre-existing file, a read of the source and a creation, both directly in /tmp
+        let src = tempfile::NamedTempFile::new_in("/tmp").unwrap();
+        let dst = src.path().with_extension("dst");
+        let cmd = ["cp", src.path().to_str().unwrap(), dst.to_str().unwrap()];
+        for shh_opts in &*ALL_SHH_RUN_OPTS {
+            eprintln!("shh run option: {}", shh_opts.join(" "));
+            let sd_opts = generate_options(&cmd, shh_opts);
+            fs::remove_file(&dst).unwrap();
+            let _ = systemd_run(&cmd, &sd_opts, false);
+            fs::remove_file(&dst).unwrap();
+        }
+    }
+
+    #[test]
+    fn systemd_run_write_tmp_dirs() {
+        // Create a file in each of several pre-existing directories directly in /tmp, /tmp itself is not written
+        let dirs: Vec<_> = iter::repeat_with(|| tempfile::tempdir_in("/tmp").unwrap())
+            .take(6)
+            .collect();
+        let mut cmd = vec![
+            "sh",
+            "-c",
+            r#"for d in "$@"; do echo x > "$d/f" || exit 1; done"#,
+            "sh",
+        ];
+        cmd.extend(dirs.iter().map(|d| d.path().to_str().unwrap()));
+        for shh_opts in &*ALL_SHH_RUN_OPTS {
+            eprintln!("shh run option: {}", shh_opts.join(" "));
+            let sd_opts = generate_options(&cmd, shh_opts);
+            for dir in &dirs {
+                fs::remove_file(dir.path().join("f")).unwrap();
+            }
+            let _ = systemd_run(&cmd, &sd_opts, false);
+            for dir in &dirs {
+                fs::remove_file(dir.path().join("f")).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn systemd_run_write_listed_dir_subdirs() {
+        // List a directory, then create a file in each of its pre-existing subdirectories; there are more of
+        // them than the largest merge threshold of `all_shh_run_opts`, so that merging the writable exceptions
+        // would put them onto the read-only directory
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let subdirs: Vec<_> = (0..101)
+            .map(|i| {
+                let subdir = dir.path().join(i.to_string());
+                fs::create_dir(&subdir).unwrap();
+                subdir
+            })
+            .collect();
+        let cmd = [
+            "sh",
+            "-c",
+            r#"ls "$1" > /dev/null && for d in "$1"/*; do echo x > "$d/f" || exit 1; done"#,
+            "sh",
+            dir.path().to_str().unwrap(),
+        ];
+        for shh_opts in &*ALL_SHH_RUN_OPTS {
+            eprintln!("shh run option: {}", shh_opts.join(" "));
+            let sd_opts = generate_options(&cmd, shh_opts);
+            for subdir in &subdirs {
+                fs::remove_file(subdir.join("f")).unwrap();
+            }
+            let _ = systemd_run(&cmd, &sd_opts, false);
+            for subdir in &subdirs {
+                fs::remove_file(subdir.join("f")).unwrap();
+            }
         }
     }
 }

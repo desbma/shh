@@ -20,7 +20,7 @@ use crate::{
         options::{
             DeniableAction, DenySyscalls, EmptyPathDescription, ListMode, OptionContext,
             OptionEffect, OptionUpdater, OptionValue, OptionValueDescription, OptionValueEffect,
-            OptionWithValue, PathDescription, SYSCALL_CLASSES, action_path_exception,
+            OptionWithValue, PathDescription, PathMount, SYSCALL_CLASSES, action_path_exception,
             merge_similar_paths,
         },
     },
@@ -551,15 +551,11 @@ impl OptionSpec for ReadOnlyPaths {
         OptionDescription {
             name: "ReadOnlyPaths",
             possible_values: vec![OptionValueDescription {
-                value: OptionValue::List(ListOptionValue {
-                    values: vec!["/".to_owned()],
-                    value_if_empty: None,
-                    option_prefix: "",
-                    elem_prefix: "-",
-                    repeat_option: false,
-                    mode: ListMode::BlackList,
-                    mergeable_paths: true,
-                }),
+                value: OptionValue::path_list(
+                    vec!["/".to_owned()],
+                    ListMode::BlackList,
+                    PathMount::ReadOnly,
+                ),
                 desc: OptionEffect::Simple(OptionValueEffect::Multiple(vec![
                     OptionValueEffect::DenyWrite(PathDescription::base("/")),
                     OptionValueEffect::DenyAction(DeniableAction::MountToHost),
@@ -606,31 +602,23 @@ impl OptionUpdater for ReadOnlyPaths {
                 vec![
                     OptionWithValue {
                         name: "ReadOnlyPaths",
-                        value: OptionValue::List(ListOptionValue {
-                                    #[expect(clippy::unwrap_used)] // path is from our option, so unicode safe
-                                    values: vec![base.to_str().unwrap().to_owned()],
-                                    value_if_empty: None,
-                                    option_prefix: "",
-                                    elem_prefix: "-",
-                                    repeat_option: false,
-                                    mode: ListMode::BlackList,
-                                    mergeable_paths: true,
-                                }),
+                        #[expect(clippy::unwrap_used)] // path is from our option, so unicode safe
+                        value: OptionValue::path_list(
+                            vec![base.to_str().unwrap().to_owned()],
+                            ListMode::BlackList,
+                            PathMount::ReadOnly,
+                        ),
                     },
                     OptionWithValue {
                         name: "ReadWritePaths",
-                        value: OptionValue::List(ListOptionValue {
-                            values: merge_similar_paths(exceptions, None)
+                        value: OptionValue::path_list(
+                            merge_similar_paths(exceptions, None)
                                 .iter()
                                 .filter_map(|p| p.to_str().map(ToOwned::to_owned))
                                 .collect(),
-                            value_if_empty: None,
-                            option_prefix: "",
-                            elem_prefix: "-",
-                            repeat_option: false,
-                            mode: ListMode::WhiteList,
-                            mergeable_paths: true,
-                        }),
+                            ListMode::WhiteList,
+                            PathMount::Writable,
+                        ),
                     },
                 ]
             }
@@ -660,15 +648,11 @@ impl OptionSpec for InaccessiblePaths {
 
     fn build(&'static self, _ctx: &OptionContext<'_>) -> OptionDescription {
         let mut possible_values = vec![OptionValueDescription {
-            value: OptionValue::List(ListOptionValue {
-                values: vec!["/".to_owned()],
-                value_if_empty: None,
-                option_prefix: "",
-                elem_prefix: "-",
-                repeat_option: false,
-                mode: ListMode::BlackList,
-                mergeable_paths: true,
-            }),
+            value: OptionValue::path_list(
+                vec!["/".to_owned()],
+                ListMode::BlackList,
+                PathMount::Other,
+            ),
             desc: OptionEffect::Simple(OptionValueEffect::Multiple(vec![
                 OptionValueEffect::RemovePath(PathDescription::base("/")),
                 OptionValueEffect::DenyAction(DeniableAction::MountToHost),
@@ -697,15 +681,11 @@ impl OptionSpec for InaccessiblePaths {
             possible_values.insert(
                 0,
                 OptionValueDescription {
-                    value: OptionValue::List(ListOptionValue {
-                        values: base_paths.clone(),
-                        value_if_empty: None,
-                        option_prefix: "",
-                        elem_prefix: "-",
-                        repeat_option: false,
-                        mode: ListMode::BlackList,
-                        mergeable_paths: true,
-                    }),
+                    value: OptionValue::path_list(
+                        base_paths.clone(),
+                        ListMode::BlackList,
+                        PathMount::Other,
+                    ),
                     desc: OptionEffect::Cumulative(
                         base_paths
                             .iter()
@@ -823,69 +803,44 @@ impl OptionUpdater for InaccessiblePaths {
                 );
                 new_opts.push(OptionWithValue {
                     name: "TemporaryFileSystem",
-                    value: OptionValue::List(ListOptionValue {
+                    value: OptionValue::List(Box::new(ListOptionValue {
                                 #[expect(clippy::unwrap_used)]  // path is from our option, so unicode safe
-                                values: vec![if *base_ro {
-                                    format!("{}:ro", base.to_str().unwrap())
-                                } else {
-                                    base.to_str().unwrap().to_owned()
-                                }],
+                                values: vec![base.to_str().unwrap().to_owned()],
                                 value_if_empty: None,
                                 option_prefix: "",
                                 elem_prefix: "",
+                                elem_suffix: if *base_ro { ":ro" } else { "" },
                                 repeat_option: false,
                                 mode: ListMode::BlackList,
-                                mergeable_paths: true,
-                            }),
+                                paths: Some(if *base_ro { PathMount::ReadOnly } else { PathMount::Writable }),
+                            })),
                 });
-                let merged_exceptions_ro: Vec<_> = {
-                    let merged_paths = merge_similar_paths(exceptions_ro, None);
-                    if merged_paths.iter().any(|p| *base_ro && (p == base)) {
-                        // The exception nullifies the option, bail out
-                        return vec![];
-                    }
-                    merged_paths
-                        .into_iter()
-                        .filter_map(|p| p.to_str().map(ToOwned::to_owned))
-                        .collect()
-                };
+                let merged_exceptions_ro: Vec<_> = merge_similar_paths(exceptions_ro, None)
+                    .into_iter()
+                    .filter_map(|p| p.to_str().map(ToOwned::to_owned))
+                    .collect();
                 if !merged_exceptions_ro.is_empty() {
                     new_opts.push(OptionWithValue {
                         name: "BindReadOnlyPaths",
-                        value: OptionValue::List(ListOptionValue {
-                            values: merged_exceptions_ro,
-                            value_if_empty: None,
-                            option_prefix: "",
-                            elem_prefix: "-",
-                            repeat_option: false,
-                            mode: ListMode::WhiteList,
-                            mergeable_paths: true,
-                        }),
+                        value: OptionValue::path_list(
+                            merged_exceptions_ro,
+                            ListMode::WhiteList,
+                            PathMount::ReadOnly,
+                        ),
                     });
                 }
-                let merged_exceptions_rw: Vec<_> = {
-                    let merged_paths = merge_similar_paths(exceptions_rw, None);
-                    if merged_paths.iter().any(|p| p == base) {
-                        // The exception nullifies the option, bail out
-                        return vec![];
-                    }
-                    merged_paths
-                        .into_iter()
-                        .filter_map(|p| p.to_str().map(ToOwned::to_owned))
-                        .collect()
-                };
+                let merged_exceptions_rw: Vec<_> = merge_similar_paths(exceptions_rw, None)
+                    .into_iter()
+                    .filter_map(|p| p.to_str().map(ToOwned::to_owned))
+                    .collect();
                 if !merged_exceptions_rw.is_empty() {
                     new_opts.push(OptionWithValue {
                         name: "BindPaths",
-                        value: OptionValue::List(ListOptionValue {
-                            values: merged_exceptions_rw,
-                            value_if_empty: None,
-                            option_prefix: "",
-                            elem_prefix: "-",
-                            repeat_option: false,
-                            mode: ListMode::WhiteList,
-                            mergeable_paths: true,
-                        }),
+                        value: OptionValue::path_list(
+                            merged_exceptions_rw,
+                            ListMode::WhiteList,
+                            PathMount::Writable,
+                        ),
                     });
                 }
                 new_opts
@@ -901,15 +856,11 @@ impl OptionUpdater for InaccessiblePaths {
                 assert!(exceptions.is_empty());
                 vec![OptionWithValue {
                     name: "InaccessiblePaths",
-                    value: OptionValue::List(ListOptionValue {
-                        values: vec![base.to_str().unwrap().to_owned()],
-                        value_if_empty: None,
-                        option_prefix: "",
-                        elem_prefix: "-",
-                        repeat_option: false,
-                        mode: ListMode::BlackList,
-                        mergeable_paths: true,
-                    }),
+                    value: OptionValue::path_list(
+                        vec![base.to_str().unwrap().to_owned()],
+                        ListMode::BlackList,
+                        PathMount::Other,
+                    ),
                 }]
             }
             _ => unreachable!(),
@@ -939,15 +890,11 @@ impl OptionSpec for NoExecPaths {
         OptionDescription {
             name: "NoExecPaths",
             possible_values: vec![OptionValueDescription {
-                value: OptionValue::List(ListOptionValue {
-                    values: vec!["/".to_owned()],
-                    value_if_empty: None,
-                    option_prefix: "",
-                    elem_prefix: "-",
-                    repeat_option: false,
-                    mode: ListMode::BlackList,
-                    mergeable_paths: true,
-                }),
+                value: OptionValue::path_list(
+                    vec!["/".to_owned()],
+                    ListMode::BlackList,
+                    PathMount::Other,
+                ),
                 desc: OptionEffect::Simple(OptionValueEffect::Multiple(vec![
                     OptionValueEffect::DenyExec(PathDescription::base("/")),
                     OptionValueEffect::DenyAction(DeniableAction::MountToHost),
@@ -990,31 +937,23 @@ impl OptionUpdater for NoExecPaths {
                 vec![
                     OptionWithValue {
                         name: "NoExecPaths",
-                        value: OptionValue::List(ListOptionValue {
-                                    #[expect(clippy::unwrap_used)] // path is from our option, so unicode safe
-                                    values: vec![base.to_str().unwrap().to_owned()],
-                                    value_if_empty: None,
-                                    option_prefix: "",
-                                    elem_prefix: "-",
-                                    repeat_option: false,
-                                    mode: ListMode::BlackList,
-                                    mergeable_paths: true,
-                                }),
+                        #[expect(clippy::unwrap_used)] // path is from our option, so unicode safe
+                        value: OptionValue::path_list(
+                            vec![base.to_str().unwrap().to_owned()],
+                            ListMode::BlackList,
+                            PathMount::Other,
+                        ),
                     },
                     OptionWithValue {
                         name: "ExecPaths",
-                        value: OptionValue::List(ListOptionValue {
-                            values: merge_similar_paths(exceptions, None)
+                        value: OptionValue::path_list(
+                            merge_similar_paths(exceptions, None)
                                 .iter()
                                 .filter_map(|p| p.to_str().map(ToOwned::to_owned))
                                 .collect(),
-                            value_if_empty: None,
-                            option_prefix: "",
-                            elem_prefix: "-",
-                            repeat_option: false,
-                            mode: ListMode::WhiteList,
-                            mergeable_paths: true,
-                        }),
+                            ListMode::WhiteList,
+                            PathMount::Other,
+                        ),
                     },
                 ]
             }
@@ -1041,15 +980,16 @@ impl OptionSpec for RestrictAddressFamilies {
         OptionDescription {
             name: "RestrictAddressFamilies",
             possible_values: vec![OptionValueDescription {
-                value: OptionValue::List(ListOptionValue {
+                value: OptionValue::List(Box::new(ListOptionValue {
                     values: ADDRESS_FAMILIES.iter().map(|s| (*s).to_owned()).collect(),
                     value_if_empty: Some("none"),
                     option_prefix: "",
                     elem_prefix: "",
+                    elem_suffix: "",
                     repeat_option: false,
                     mode: ListMode::WhiteList,
-                    mergeable_paths: false,
-                }),
+                    paths: None,
+                })),
                 desc: OptionEffect::Cumulative(
                     ADDRESS_FAMILIES
                         .iter()
@@ -1121,7 +1061,7 @@ impl OptionSpec for SocketBindDeny {
         OptionDescription {
             name: "SocketBindDeny",
             possible_values: vec![OptionValueDescription {
-                value: OptionValue::List(ListOptionValue {
+                value: OptionValue::List(Box::new(ListOptionValue {
                     values: deny_binds
                         .iter()
                         .map(|(af, proto)| format!("{af}:{proto}"))
@@ -1129,10 +1069,11 @@ impl OptionSpec for SocketBindDeny {
                     value_if_empty: None,
                     option_prefix: "",
                     elem_prefix: "",
+                    elem_suffix: "",
                     repeat_option: true,
                     mode: ListMode::BlackList,
-                    mergeable_paths: false,
-                }),
+                    paths: None,
+                })),
                 desc: OptionEffect::Cumulative(
                     deny_binds
                         .into_iter()
@@ -1318,7 +1259,7 @@ impl OptionUpdater for IpAddressDeny {
                     },
                     OptionWithValue {
                         name: "IPAddressAllow",
-                        value: OptionValue::List(ListOptionValue {
+                        value: OptionValue::List(Box::new(ListOptionValue {
                             values: address
                                 .excluded_elements()
                                 .into_iter()
@@ -1327,10 +1268,11 @@ impl OptionUpdater for IpAddressDeny {
                             value_if_empty: None,
                             option_prefix: "",
                             elem_prefix: "",
+                            elem_suffix: "",
                             repeat_option: false,
                             mode: ListMode::WhiteList,
-                            mergeable_paths: false,
-                        }),
+                            paths: None,
+                        })),
                     },
                 ]
             }
@@ -1517,15 +1459,16 @@ impl OptionSpec for CapabilityBoundingSet {
         OptionDescription {
             name: "CapabilityBoundingSet",
             possible_values: vec![OptionValueDescription {
-                value: OptionValue::List(ListOptionValue {
+                value: OptionValue::List(Box::new(ListOptionValue {
                     values: cap_effects.iter().map(|(c, _e)| (*c).to_owned()).collect(),
                     value_if_empty: None,
                     option_prefix: "~",
                     elem_prefix: "",
+                    elem_suffix: "",
                     repeat_option: false,
                     mode: ListMode::BlackList,
-                    mergeable_paths: false,
-                }),
+                    paths: None,
+                })),
                 desc: OptionEffect::Cumulative(cap_effects.into_iter().map(|(_c, e)| e).collect()),
             }],
             updater: None,
@@ -1569,7 +1512,7 @@ impl OptionSpec for SystemCallFilter {
         OptionDescription {
             name: "SystemCallFilter",
             possible_values: vec![OptionValueDescription {
-                value: OptionValue::List(ListOptionValue {
+                value: OptionValue::List(Box::new(ListOptionValue {
                     values: syscall_classes
                         .iter()
                         .map(|c| format!("@{c}:EPERM"))
@@ -1577,10 +1520,11 @@ impl OptionSpec for SystemCallFilter {
                     value_if_empty: None,
                     option_prefix: "~",
                     elem_prefix: "",
+                    elem_suffix: "",
                     repeat_option: false,
                     mode: ListMode::BlackList,
-                    mergeable_paths: false,
-                }),
+                    paths: None,
+                })),
                 desc: OptionEffect::Cumulative(
                     syscall_classes
                         .into_iter()
