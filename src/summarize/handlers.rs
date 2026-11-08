@@ -759,7 +759,8 @@ impl SyscallHandler for NetworkHandler {
 pub(crate) struct OpenHandler {
     pub relfd: Option<usize>,
     pub path: usize,
-    pub flags: usize,
+    /// Index of the flags argument, or of the `open_how` struct argument for `openat2`, absent for `creat`
+    pub flags: Option<usize>,
 }
 
 impl SyscallHandler for OpenHandler {
@@ -779,13 +780,6 @@ impl SyscallHandler for OpenHandler {
                 value: b,
                 type_: BufferType::Unknown,
             }) => PathBuf::from(OsStr::from_bytes(b))
-        );
-        let flags_val = unpack_expr!(
-            flags,
-            Expression::Integer(IntegerExpression {
-                value: flags_val,
-                ..
-            }) => flags_val
         );
 
         path = if let Some(path) = resolve_path(&path, relfd, state.cur_dir.as_ref()) {
@@ -808,20 +802,38 @@ impl SyscallHandler for OpenHandler {
             path = ret_path.unwrap_or(path);
         }
 
+        let (create, write, read) = if let Some(flags) = flags {
+            let flags = if sc.name == "openat2" {
+                let members = unpack_expr!(flags, Expression::Struct(members) => members);
+                unpack_struct_member!(members, "flags")
+            } else {
+                flags
+            };
+            let flags_val = unpack_expr!(flags, Expression::Integer(flags) => &flags.value);
+            (
+                flags_val.is_flag_set("O_CREAT"),
+                flags_val.is_flag_set("O_WRONLY")
+                    || flags_val.is_flag_set("O_RDWR")
+                    || flags_val.is_flag_set("O_TRUNC"),
+                flags_val.is_flag_set("O_RDONLY") || !flags_val.is_flag_set("O_WRONLY"),
+            )
+        } else {
+            // creat, same as O_CREAT|O_WRONLY|O_TRUNC
+            (true, true, false)
+        };
+
         if !is_pseudo_path(&path) {
             // Set actions from flags
-            if flags_val.is_flag_set("O_CREAT") {
+            if create {
                 actions.push(ProgramAction::Create(path.clone()));
             }
-            if (flags_val.is_flag_set("O_WRONLY")
-            || flags_val.is_flag_set("O_RDWR")
-            || flags_val.is_flag_set("O_TRUNC"))
+            if write
             // char devices can be written to, even if filesystem is mounted read only
             && !path.metadata().is_ok_and(|m| m.file_type().is_char_device())
             {
                 actions.push(ProgramAction::Write(path.clone()));
             }
-            if flags_val.is_flag_set("O_RDONLY") || !flags_val.is_flag_set("O_WRONLY") {
+            if read {
                 assert!(!path.to_str().is_some_and(|p| p.starts_with("net:")));
                 actions.push(ProgramAction::Read(path.clone()));
             }
@@ -1684,7 +1696,7 @@ x86_Thread_features_locked:
     }
 
     // Helper to create a BinaryOr flag expression
-    fn binary_or_flags(flags: &[&str]) -> Expression {
+    pub(crate) fn binary_or_flags(flags: &[&str]) -> Expression {
         Expression::Integer(IntegerExpression {
             value: IntegerExpressionValue::BinaryOr(
                 flags

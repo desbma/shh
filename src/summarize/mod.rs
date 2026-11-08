@@ -310,6 +310,14 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
         m.insert("clone", Box::new(Clone3Handler { args: 0 }));
         m.insert("clone3", Box::new(Clone3Handler { args: 0 }));
         m.insert("connect", Box::new(NetworkHandler { fd: 0, sockaddr: 1 }));
+        m.insert(
+            "creat",
+            Box::new(OpenHandler {
+                relfd: None,
+                path: 0,
+                flags: None,
+            }),
+        );
         m.insert("epoll_ctl", Box::new(EpollCtlHandler { op: 1, event: 3 }));
         m.insert(
             "execve",
@@ -513,7 +521,7 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             Box::new(OpenHandler {
                 relfd: None,
                 path: 0,
-                flags: 1,
+                flags: Some(1),
             }),
         );
         m.insert(
@@ -521,7 +529,15 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             Box::new(OpenHandler {
                 relfd: Some(0),
                 path: 1,
-                flags: 2,
+                flags: Some(2),
+            }),
+        );
+        m.insert(
+            "openat2",
+            Box::new(OpenHandler {
+                relfd: Some(0),
+                path: 1,
+                flags: Some(2),
             }),
         );
         m.insert(
@@ -886,7 +902,9 @@ mod tests {
     };
 
     use super::{
-        handlers::tests::{buf_expr, fd_expr, int_literal, make_syscall, named_symbol},
+        handlers::tests::{
+            binary_or_flags, buf_expr, fd_expr, int_literal, make_syscall, named_symbol,
+        },
         *,
     };
     use crate::strace::*;
@@ -1173,6 +1191,81 @@ mod tests {
 
     fn syscall(name: &str, args: Vec<Expression>) -> SyscallItem {
         SyscallItem::Complete(Box::new(make_syscall(name, args, 0)))
+    }
+
+    #[test]
+    fn creat_creates_path() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let syscalls = [Ok(syscall(
+            "creat",
+            vec![buf_expr(b"/var/lib/test"), int_literal(0o644)],
+        ))];
+        assert_eq!(
+            summarize(syscalls, &[], program_state()).unwrap(),
+            vec![
+                ProgramAction::Create("/var/lib/test".into()),
+                ProgramAction::Write("/var/lib/test".into()),
+                ProgramAction::Syscalls(["creat".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn openat2_actions_follow_flags() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        for (flags, mode, actions) in [
+            (
+                &["O_RDWR", "O_CREAT", "O_CLOEXEC"][..],
+                0o600,
+                vec![
+                    ProgramAction::Create("/var/lib/test".into()),
+                    ProgramAction::Write("/var/lib/test".into()),
+                    ProgramAction::Read("/var/lib/test".into()),
+                ],
+            ),
+            (
+                &["O_RDONLY"],
+                0,
+                vec![ProgramAction::Read("/var/lib/test".into())],
+            ),
+            (
+                &["O_WRONLY"],
+                0,
+                vec![ProgramAction::Write("/var/lib/test".into())],
+            ),
+            (
+                &["O_RDONLY", "O_TRUNC"],
+                0,
+                vec![
+                    ProgramAction::Write("/var/lib/test".into()),
+                    ProgramAction::Read("/var/lib/test".into()),
+                ],
+            ),
+        ] {
+            let syscalls = [Ok(syscall(
+                "openat2",
+                vec![
+                    fd_expr(3, "/var/lib"),
+                    buf_expr(b"test"),
+                    Expression::Struct(HashMap::from([
+                        ("flags".to_owned(), binary_or_flags(flags)),
+                        ("mode".to_owned(), int_literal(mode)),
+                        ("resolve".to_owned(), int_literal(0)),
+                    ])),
+                    int_literal(24),
+                ],
+            ))];
+            assert_eq!(
+                summarize(syscalls, &[], program_state()).unwrap(),
+                [
+                    actions,
+                    vec![ProgramAction::Syscalls(["openat2".into()].into())]
+                ]
+                .concat()
+            );
+        }
     }
 
     #[test]

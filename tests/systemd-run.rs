@@ -10,6 +10,7 @@ mod tests {
         io::{BufRead as _, Write as _},
         iter,
         os::unix::fs::{FileTypeExt as _, PermissionsExt as _},
+        path::Path,
         process,
         sync::LazyLock,
     };
@@ -149,6 +150,18 @@ mod tests {
             eprintln!("shh run option: {}", shh_opts.join(" "));
             let sd_opts = generate_options(cmd, &shh_opts);
             let _ = systemd_run(cmd, &sd_opts, user);
+        }
+    }
+
+    /// Profile a command creating a path with every `shh run` option set, and run it as a system service with
+    /// the generated options, removing the path after each step
+    fn profile_and_run_creating_path(cmd: &[&str], path: &Path) {
+        for shh_opts in &*ALL_SHH_RUN_OPTS {
+            eprintln!("shh run option: {}", shh_opts.join(" "));
+            let sd_opts = generate_options(cmd, shh_opts);
+            fs::remove_file(path).unwrap();
+            let _ = systemd_run(cmd, &sd_opts, false);
+            fs::remove_file(path).unwrap();
         }
     }
 
@@ -571,18 +584,41 @@ ptrace(PTRACE_DETACH, target_pid)
     }
 
     #[test]
+    fn systemd_run_creat() {
+        // Create a file with the creat syscall, a write to its directory
+        let dir = tempfile::tempdir_in("/var/lib").unwrap();
+        let path = dir.path().join("file");
+        let cmd = [
+            "python3",
+            "-c",
+            "import ctypes, sys; sys.exit(ctypes.CDLL(None).creat(sys.argv[1].encode(), 0o644) < 0)",
+            path.to_str().unwrap(),
+        ];
+        profile_and_run_creating_path(&cmd, &path);
+    }
+
+    #[test]
+    fn systemd_run_openat2() {
+        // Create a file with the openat2 syscall, a write to its directory
+        let dir = tempfile::tempdir_in("/var/lib").unwrap();
+        let path = dir.path().join("file");
+        let cmd = [
+            "python3",
+            "-c",
+            "import ctypes, os, struct, sys; how = struct.pack('QQQ', os.O_WRONLY | os.O_CREAT, 0o644, 0); \
+             sys.exit(ctypes.CDLL(None).syscall(437, -100, sys.argv[1].encode(), how, len(how)) < 0)",
+            path.to_str().unwrap(),
+        ];
+        profile_and_run_creating_path(&cmd, &path);
+    }
+
+    #[test]
     fn systemd_run_symlink() {
         // Create a symlink, a write to its directory
         let temp_dir = tempfile::tempdir_in("/var/lib").unwrap();
         let path = temp_dir.path().join("link");
         let cmd = ["ln", "-s", "/dev/null", path.to_str().unwrap()];
-        for shh_opts in &*ALL_SHH_RUN_OPTS {
-            eprintln!("shh run option: {}", shh_opts.join(" "));
-            let sd_opts = generate_options(&cmd, shh_opts);
-            fs::remove_file(&path).unwrap();
-            let _ = systemd_run(&cmd, &sd_opts, false);
-            fs::remove_file(&path).unwrap();
-        }
+        profile_and_run_creating_path(&cmd, &path);
     }
 
     #[test]
@@ -591,13 +627,7 @@ ptrace(PTRACE_DETACH, target_pid)
         let src = tempfile::NamedTempFile::new_in("/tmp").unwrap();
         let dst = src.path().with_extension("dst");
         let cmd = ["ln", src.path().to_str().unwrap(), dst.to_str().unwrap()];
-        for shh_opts in &*ALL_SHH_RUN_OPTS {
-            eprintln!("shh run option: {}", shh_opts.join(" "));
-            let sd_opts = generate_options(&cmd, shh_opts);
-            fs::remove_file(&dst).unwrap();
-            let _ = systemd_run(&cmd, &sd_opts, false);
-            fs::remove_file(&dst).unwrap();
-        }
+        profile_and_run_creating_path(&cmd, &dst);
     }
 
     #[test]
@@ -635,13 +665,7 @@ ptrace(PTRACE_DETACH, target_pid)
         let src = tempfile::NamedTempFile::new_in("/tmp").unwrap();
         let dst = src.path().with_extension("dst");
         let cmd = ["cp", src.path().to_str().unwrap(), dst.to_str().unwrap()];
-        for shh_opts in &*ALL_SHH_RUN_OPTS {
-            eprintln!("shh run option: {}", shh_opts.join(" "));
-            let sd_opts = generate_options(&cmd, shh_opts);
-            fs::remove_file(&dst).unwrap();
-            let _ = systemd_run(&cmd, &sd_opts, false);
-            fs::remove_file(&dst).unwrap();
-        }
+        profile_and_run_creating_path(&cmd, &dst);
     }
 
     #[test]
