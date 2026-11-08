@@ -32,9 +32,9 @@ use handlers::{
 /// This does *not* map 1-1 with a syscall, and does *not* necessarily respect chronology
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum ProgramAction {
-    /// Path was created, or stands for an unnamed file created in its parent directory
+    /// Create a path, or an unnamed file in the directory it names
     Create(PathBuf),
-    /// Path was exec'd
+    /// Exec a path
     Exec(PathBuf),
     /// Memory mapping with huge pages
     HugePageMemoryMapping,
@@ -48,9 +48,9 @@ pub(crate) enum ProgramAction {
     MountToHost,
     /// Network (socket) activity
     NetworkActivity(Box<NetworkActivity>),
-    /// Path was accessed (open, stat'ed, read...)
+    /// Access a path (open, stat, read...)
     Read(PathBuf),
-    /// Path was removed
+    /// Remove a path
     Remove(PathBuf),
     /// Paths a link or rename needs on the same mount
     RequireSameMount(PathBuf, PathBuf),
@@ -62,7 +62,7 @@ pub(crate) enum ProgramAction {
     Syscalls(HashSet<SyscallName>),
     /// Inhibit suspend
     Wakeup,
-    /// Path was written to (data, metadata...)
+    /// Write to a path (data, metadata...)
     Write(PathBuf),
     /// Memory mapping with write and execute bits, or execute bit added
     /// after initial mapping
@@ -1193,6 +1193,11 @@ mod tests {
         SyscallItem::Complete(Box::new(make_syscall(name, args, 0)))
     }
 
+    fn summarize_syscall(sc: Syscall) -> Vec<ProgramAction> {
+        let item = SyscallItem::Complete(Box::new(sc));
+        summarize([Ok(item)], &[], program_state()).unwrap()
+    }
+
     #[test]
     fn creat_creates_path() {
         let _ = simple_logger::SimpleLogger::new().init();
@@ -1669,16 +1674,13 @@ mod tests {
         ] {
             let sc = make_syscall(name, args, -1);
             assert_eq!(
-                summarize(
-                    [Ok(SyscallItem::Complete(Box::new(sc)))],
-                    &[],
-                    program_state()
-                )
-                .unwrap(),
+                summarize_syscall(sc),
                 vec![
                     ProgramAction::Read(link_dir.clone()),
                     ProgramAction::Read(target_dir.clone()),
                     ProgramAction::Read(existing.clone()),
+                    ProgramAction::Create(existing.clone()),
+                    ProgramAction::RequireSameMount(target_dir.clone(), temp_dir.path().to_owned()),
                     ProgramAction::Syscalls([name.into()].into()),
                 ]
             );
@@ -1780,28 +1782,204 @@ mod tests {
     }
 
     #[test]
-    fn create_existing_symlink_reads() {
+    fn create_existing_path_reads() {
         let _ = simple_logger::SimpleLogger::new().init();
 
         let temp_dir = tempfile::tempdir().unwrap();
+        let dir = temp_dir.path().join("dir");
+        fs::create_dir(&dir).unwrap();
         let link = temp_dir.path().join("link");
         unix::fs::symlink(temp_dir.path().join("missing"), &link).unwrap();
+        for path in [dir, link] {
+            // Failing with EEXIST, which the parser keeps
+            let mkdir = make_syscall(
+                "mkdir",
+                vec![buf_expr(path.as_os_str().as_bytes()), int_literal(0o755)],
+                -1,
+            );
+            assert_eq!(
+                summarize_syscall(mkdir),
+                vec![
+                    ProgramAction::Read(path.clone()),
+                    ProgramAction::Create(path),
+                    ProgramAction::Syscalls(["mkdir".into()].into()),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn link_existing_requires_same_mount() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let existing = temp_dir.path().join("existing");
+        File::create(&existing).unwrap();
         // Failing with EEXIST, which the parser keeps
-        let mkdir = make_syscall(
-            "mkdir",
-            vec![buf_expr(link.as_os_str().as_bytes()), int_literal(0o755)],
+        let link = make_syscall(
+            "link",
+            vec![buf_expr(b"/src"), buf_expr(existing.as_os_str().as_bytes())],
             -1,
         );
         assert_eq!(
-            summarize(
-                [Ok(SyscallItem::Complete(Box::new(mkdir)))],
-                &[],
-                program_state()
-            )
-            .unwrap(),
+            summarize_syscall(link),
             vec![
-                ProgramAction::Read(link),
-                ProgramAction::Syscalls(["mkdir".into()].into()),
+                ProgramAction::Read("/src".into()),
+                ProgramAction::Read(existing.clone()),
+                ProgramAction::Create(existing),
+                ProgramAction::RequireSameMount("/src".into(), temp_dir.path().to_owned()),
+                ProgramAction::Syscalls(["link".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn open_excl_existing_reads() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let existing = temp_dir.path().join("existing");
+        File::create(&existing).unwrap();
+        let existing_bytes = existing.as_os_str().as_bytes();
+        let flags = ["O_RDWR", "O_CREAT", "O_EXCL"];
+        // Failing with EEXIST, which the parser keeps
+        for (name, args) in [
+            (
+                "open",
+                vec![
+                    buf_expr(existing_bytes),
+                    binary_or_flags(&flags),
+                    int_literal(0o644),
+                ],
+            ),
+            (
+                "openat",
+                vec![
+                    named_symbol("AT_FDCWD"),
+                    buf_expr(existing_bytes),
+                    binary_or_flags(&flags),
+                    int_literal(0o644),
+                ],
+            ),
+            (
+                "openat2",
+                vec![
+                    named_symbol("AT_FDCWD"),
+                    buf_expr(existing_bytes),
+                    Expression::Struct(HashMap::from([
+                        ("flags".to_owned(), binary_or_flags(&flags)),
+                        ("mode".to_owned(), int_literal(0o644)),
+                        ("resolve".to_owned(), int_literal(0)),
+                    ])),
+                    int_literal(24),
+                ],
+            ),
+        ] {
+            let sc = make_syscall(name, args, -1);
+            assert_eq!(
+                summarize_syscall(sc),
+                vec![
+                    ProgramAction::Read(existing.clone()),
+                    ProgramAction::Create(existing.clone()),
+                    ProgramAction::Write(existing.clone()),
+                    ProgramAction::Syscalls([name.into()].into()),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn open_excl_existing_symlink_no_follow() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let parent = temp_dir.path().join("parent");
+        fs::create_dir(&parent).unwrap();
+        let alias = temp_dir.path().join("alias");
+        unix::fs::symlink(&parent, &alias).unwrap();
+        let target = temp_dir.path().join("target");
+        let link = parent.join("link");
+        File::create(&target).unwrap();
+        unix::fs::symlink(&target, &link).unwrap();
+        // Failing with EEXIST, which the parser keeps
+        let sc = make_syscall(
+            "openat",
+            vec![
+                named_symbol("AT_FDCWD"),
+                buf_expr(alias.join("link").as_os_str().as_bytes()),
+                binary_or_flags(&["O_WRONLY", "O_CREAT", "O_EXCL"]),
+                int_literal(0o644),
+            ],
+            -1,
+        );
+        assert_eq!(
+            summarize_syscall(sc),
+            vec![
+                ProgramAction::Read(alias),
+                ProgramAction::Read(link.clone()),
+                ProgramAction::Create(link.clone()),
+                ProgramAction::Write(link),
+                ProgramAction::Syscalls(["openat".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn rename_noreplace_existing_reads() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let existing = temp_dir.path().join("existing");
+        File::create(&existing).unwrap();
+        // Failing with EEXIST, which the parser keeps
+        let sc = make_syscall(
+            "renameat2",
+            vec![
+                named_symbol("AT_FDCWD"),
+                buf_expr(b"/src/file"),
+                named_symbol("AT_FDCWD"),
+                buf_expr(existing.as_os_str().as_bytes()),
+                named_symbol("RENAME_NOREPLACE"),
+            ],
+            -1,
+        );
+        assert_eq!(
+            summarize_syscall(sc),
+            vec![
+                ProgramAction::Read("/src/file".into()),
+                ProgramAction::Write("/src/file".into()),
+                ProgramAction::Read(existing.clone()),
+                ProgramAction::Create(existing.clone()),
+                ProgramAction::Write(existing),
+                ProgramAction::RequireSameMount("/src".into(), temp_dir.path().to_owned()),
+                ProgramAction::Syscalls(["renameat2".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn mknod_existing_reads() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let existing = temp_dir.path().join("existing");
+        File::create(&existing).unwrap();
+        // Failing with EEXIST, which the parser keeps
+        let sc = make_syscall(
+            "mknod",
+            vec![
+                buf_expr(existing.as_os_str().as_bytes()),
+                binary_or_flags(&["S_IFIFO"]),
+                int_literal(0),
+            ],
+            -1,
+        );
+        assert_eq!(
+            summarize_syscall(sc),
+            vec![
+                ProgramAction::Read(existing.clone()),
+                ProgramAction::Create(existing),
+                ProgramAction::Syscalls(["mknod".into()].into()),
             ]
         );
     }
@@ -1826,12 +2004,7 @@ mod tests {
             -1,
         );
         assert_eq!(
-            summarize(
-                [Ok(SyscallItem::Complete(Box::new(lsetxattr)))],
-                &[],
-                program_state()
-            )
-            .unwrap(),
+            summarize_syscall(lsetxattr),
             vec![
                 ProgramAction::Write(link),
                 ProgramAction::Syscalls(["lsetxattr".into()].into()),

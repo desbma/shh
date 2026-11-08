@@ -479,6 +479,10 @@ impl SyscallHandler for MknodHandler {
             actions.push(ProgramAction::MknodSpecial);
         }
         if let Some(path) = path {
+            // A creation failing on an existing entry depends on it
+            if !sc.is_successful() {
+                actions.push(ProgramAction::Read(path.clone()));
+            }
             actions.push(ProgramAction::Create(path));
         }
         Ok(())
@@ -788,21 +792,7 @@ impl SyscallHandler for OpenHandler {
             return Ok(());
         };
 
-        // Add actions for traversed symlinks
-        traverse_symlinks(&mut path, actions);
-
-        if let Some(ret_val) = &sc.ret_val
-            && ret_val.value().is_some_and(|v| v != -1)
-        {
-            // Returned fd has normalized path, use it if we can
-            let ret_path = ret_val
-                .metadata
-                .as_ref()
-                .map(|b| PathBuf::from(OsStr::from_bytes(b)));
-            path = ret_path.unwrap_or(path);
-        }
-
-        let (create, write, read) = if let Some(flags) = flags {
+        let (create, exclusive, write, read) = if let Some(flags) = flags {
             let flags = if sc.name == "openat2" {
                 let members = unpack_expr!(flags, Expression::Struct(members) => members);
                 unpack_struct_member!(members, "flags")
@@ -812,13 +802,15 @@ impl SyscallHandler for OpenHandler {
             let flags_val = unpack_expr!(flags, Expression::Integer(flags) => &flags.value);
             if flags_val.is_flag_set("O_PATH") {
                 // Lookup only, the kernel ignores the other flags
-                (false, false, true)
+                (false, false, false, true)
             } else if flags_val.is_flag_set("O_TMPFILE") {
                 // Unnamed file in the opened directory, the returned fd path names a placeholder entry there
-                (true, false, false)
+                (true, false, false, false)
             } else {
+                let create = flags_val.is_flag_set("O_CREAT");
                 (
-                    flags_val.is_flag_set("O_CREAT"),
+                    create,
+                    create && flags_val.is_flag_set("O_EXCL"),
                     flags_val.is_flag_set("O_WRONLY")
                         || flags_val.is_flag_set("O_RDWR")
                         || flags_val.is_flag_set("O_TRUNC"),
@@ -827,11 +819,30 @@ impl SyscallHandler for OpenHandler {
             }
         } else {
             // creat, same as O_CREAT|O_WRONLY|O_TRUNC
-            (true, true, false)
+            (true, false, true, false)
         };
 
+        // Add actions for traversed symlinks, an exclusive creation failing on a final one instead of following it
+        if exclusive {
+            traverse_parent_symlinks(&mut path, actions);
+        } else {
+            traverse_symlinks(&mut path, actions);
+        }
+
+        if sc.is_successful()
+            && let Some(metadata) = sc.ret_val.as_ref().and_then(|rv| rv.metadata.as_deref())
+        {
+            // Returned fd has normalized path, use it if we can
+            path = PathBuf::from(OsStr::from_bytes(metadata));
+        }
+
+        // A creation failing on an existing entry, like with O_EXCL, depends on it
+        let existing = create && !sc.is_successful();
         if !is_pseudo_path(&path) {
             // Set actions from flags
+            if existing {
+                actions.push(ProgramAction::Read(path.clone()));
+            }
             if create {
                 actions.push(ProgramAction::Create(path.clone()));
             }
@@ -841,7 +852,7 @@ impl SyscallHandler for OpenHandler {
             {
                 actions.push(ProgramAction::Write(path.clone()));
             }
-            if read {
+            if read && !existing {
                 assert!(!path.to_str().is_some_and(|p| p.starts_with("net:")));
                 actions.push(ProgramAction::Read(path.clone()));
             }
@@ -915,9 +926,11 @@ impl SyscallHandler for RenameHandler {
         traverse_symlinks(&mut path_dst, actions);
         actions.push(ProgramAction::Read(path_src.clone()));
         actions.push(ProgramAction::Write(path_src.clone()));
-        if exchange {
+        // An exchanged destination, or one a rename fails on, like with RENAME_NOREPLACE, exists before the call
+        if exchange || !sc.is_successful() {
             actions.push(ProgramAction::Read(path_dst.clone()));
-        } else {
+        }
+        if !exchange {
             actions.push(ProgramAction::Create(path_dst.clone()));
         }
         actions.push(ProgramAction::Write(path_dst.clone()));
@@ -1269,17 +1282,12 @@ impl PathHandler {
                 traverse_parent_symlinks(&mut path, actions);
             }
         }
-        // An entry creation or removal failing on an existing symlink, like a creation with EEXIST,
-        // wrote nothing but depends on it
-        let action = if matches!(self.follow, FollowSymlink::Never)
-            && sc.ret_val.as_ref().and_then(IntegerExpression::value) == Some(-1)
-            && path.is_symlink()
-        {
-            ProgramAction::Read
-        } else {
-            self.action
-        };
-        actions.push(action(path.clone()));
+        // A call failing on an existing entry, like a creation with EEXIST, depends on it, and acts on it in a
+        // run where it is absent
+        if matches!(self.follow, FollowSymlink::Never) && !sc.is_successful() {
+            actions.push(ProgramAction::Read(path.clone()));
+        }
+        actions.push((self.action)(path.clone()));
         Ok(Some(path))
     }
 }
@@ -1310,10 +1318,9 @@ impl SyscallHandler for LinkHandler {
     ) -> Result<(), HandlerError> {
         let old = self.old.handle_path(sc, actions, state)?;
         let new = self.new.handle_path(sc, actions, state)?;
-        // A successful link needs its old path on the mount of the new path's directory
-        if sc.ret_val.as_ref().and_then(IntegerExpression::value) != Some(-1)
-            && let (Some(old), Some(new_dir)) = (old, new.as_deref().and_then(Path::parent))
-        {
+        // A link, even one failing on an existing new path, needs its old path on the mount of the new path's
+        // directory
+        if let (Some(old), Some(new_dir)) = (old, new.as_deref().and_then(Path::parent)) {
             actions.push(ProgramAction::RequireSameMount(old, new_dir.to_owned()));
         }
         Ok(())

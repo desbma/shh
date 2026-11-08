@@ -45,34 +45,37 @@ impl OptionValueEffect {
                 ProgramAction::RequireSameMount(a, b) => !noexec_paths.splits_mount(a, b),
                 _ => true,
             },
-            OptionValueEffect::EmptyPath(empty_paths) => match action {
-                ProgramAction::Read(path_action) | ProgramAction::Exec(path_action) => {
-                    !empty_paths.matches(path_action, true)
-                        || prev_actions.contains(&ProgramAction::Create(path_action.clone()))
+            OptionValueEffect::EmptyPath(empty_paths) => {
+                // A path created on the empty base, outside the exceptions mounting existing host entries
+                let created = |path: &Path| {
+                    empty_paths.matches(path, true)
+                        && prev_actions.contains(&ProgramAction::Create(path.to_owned()))
+                };
+                match action {
+                    ProgramAction::Read(path_action) | ProgramAction::Exec(path_action) => {
+                        !empty_paths.matches(path_action, true) || created(path_action)
+                    }
+                    ProgramAction::Write(path_action) => {
+                        !empty_paths.matches(path_action, false) || created(path_action)
+                    }
+                    ProgramAction::Remove(path_action) => {
+                        (!empty_paths.matches(path_action, false)
+                            && path_action
+                                .parent()
+                                .is_none_or(|pap| !empty_paths.matches(pap, false)))
+                            || created(path_action)
+                    }
+                    ProgramAction::Create(path_action) => {
+                        !empty_paths.matches(path_action, false)
+                            || (!empty_paths.base_ro
+                                && path_action
+                                    .parent()
+                                    .is_some_and(|pap| pap == empty_paths.base || created(pap)))
+                    }
+                    ProgramAction::RequireSameMount(a, b) => !empty_paths.splits_mount(a, b),
+                    _ => true,
                 }
-                ProgramAction::Write(path_action) => {
-                    !empty_paths.matches(path_action, false)
-                        || prev_actions.contains(&ProgramAction::Create(path_action.clone()))
-                }
-                ProgramAction::Remove(path_action) => {
-                    (!empty_paths.matches(path_action, false)
-                        && path_action
-                            .parent()
-                            .is_none_or(|pap| !empty_paths.matches(pap, false)))
-                        || prev_actions.contains(&ProgramAction::Create(path_action.clone()))
-                }
-                ProgramAction::Create(path_action) => {
-                    !empty_paths.matches(path_action, false)
-                        || (!empty_paths.base_ro
-                            && path_action.parent().is_some_and(|pap| {
-                                (pap == empty_paths.base)
-                                    || prev_actions
-                                        .contains(&ProgramAction::Create(pap.to_path_buf()))
-                            }))
-                }
-                ProgramAction::RequireSameMount(a, b) => !empty_paths.splits_mount(a, b),
-                _ => true,
-            },
+            }
             OptionValueEffect::RemovePath(removed_paths) => match action {
                 ProgramAction::Read(path_action)
                 | ProgramAction::Write(path_action)
@@ -1224,6 +1227,54 @@ mod tests {
             ProgramAction::RequireSameMount("/tmp/source".into(), "/tmp".into()),
         ];
         assert!(resolve_merged_paths(&["InaccessiblePaths"], &actions).is_empty());
+    }
+
+    #[test]
+    fn resolve_inaccessible_paths_existing_entry_created() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        // An entry read before its creation exists, and is mounted when it still does
+        let actions = [
+            ProgramAction::Read("/".into()),
+            ProgramAction::Read("/tmp/data".into()),
+            ProgramAction::Create("/tmp/data".into()),
+            ProgramAction::Write("/tmp/data".into()),
+        ];
+        assert_eq!(
+            resolve_merged_paths(&["InaccessiblePaths"], &actions),
+            [
+                "TemporaryFileSystem=/tmp",
+                "BindPaths=-/tmp/data",
+                "PrivateMounts=true"
+            ]
+        );
+
+        let actions = [
+            ProgramAction::Read("/".into()),
+            ProgramAction::Read("/tmp/lock".into()),
+            ProgramAction::Create("/tmp/lock".into()),
+            ProgramAction::Write("/tmp/lock".into()),
+            ProgramAction::Remove("/tmp/lock".into()),
+            ProgramAction::Create("/tmp/lock".into()),
+            ProgramAction::Write("/tmp/lock".into()),
+        ];
+        assert!(resolve_merged_paths(&["InaccessiblePaths"], &actions).is_empty());
+
+        let actions = [
+            ProgramAction::Read("/".into()),
+            ProgramAction::Read("/tmp/dir".into()),
+            ProgramAction::Create("/tmp/dir".into()),
+            ProgramAction::Create("/tmp/dir/file".into()),
+            ProgramAction::Write("/tmp/dir/file".into()),
+        ];
+        assert_eq!(
+            resolve_merged_paths(&["InaccessiblePaths"], &actions),
+            [
+                "TemporaryFileSystem=/tmp",
+                "BindPaths=-/tmp/dir",
+                "PrivateMounts=true"
+            ]
+        );
     }
 
     #[test]

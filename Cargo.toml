@@ -56,7 +56,7 @@ assert_cmd = { version = "2.2.2", default-features = false, features = ["color",
 compact_str = { version = "0.10.0", default-features = false }
 fastrand = { version = "2.5.0", default-features = false, features = ["std"] }
 insta = { version = "1.49.0", default-features = false, features = ["colors", "ron"] }
-nix = { version = "0.31.3", default-features = false, features = ["user"] }
+nix = { version = "0.31.3", default-features = false, features = ["fs", "user"] }
 predicates = { version = "3.1.4", default-features = false, features = ["color", "regex"] }
 pretty_assertions = { version = "1.4.1", default-features = false, features = ["std"] }
 smol_str = { version = "0.3.7", default-features = false }

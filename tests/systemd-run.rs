@@ -9,7 +9,10 @@ mod tests {
         fs::{self, Permissions},
         io::{BufRead as _, Write as _},
         iter,
-        os::unix::fs::{FileTypeExt as _, PermissionsExt as _},
+        os::unix::{
+            self,
+            fs::{FileTypeExt as _, PermissionsExt as _},
+        },
         path::Path,
         process,
         sync::LazyLock,
@@ -19,10 +22,55 @@ mod tests {
         Command,
         assert::{Assert, OutputAssertExt as _},
     };
+    use nix::{sys::stat, unistd};
     use predicates::prelude::predicate;
 
     static ALL_SHH_RUN_OPTS: LazyLock<Vec<Vec<&'static str>>> = LazyLock::new(all_shh_run_opts);
     const KERNEL_LOG_REGEX: &str = r"\[\ *[0-9]+\.[0-9]+\] ";
+    /// Python script attempting to create an entry, existing or not
+    const CREATE_ENTRY_SCRIPT: &str = "
+import ctypes, os, sys
+
+kind, path, src, held = sys.argv[1:]
+libc = ctypes.CDLL(None, use_errno=True)
+
+
+def check(ret):
+    if ret < 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err), path)
+
+
+if kind in ('link', 'rename'):
+    open(src, 'w').close()
+try:
+    if kind in ('open', 'open-replace'):
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL))
+    elif kind in ('mkdir', 'mkdir-p'):
+        os.mkdir(path)
+    elif kind == 'symlink':
+        os.symlink('/dev/null', path)
+    elif kind == 'link':
+        os.link(src, path)
+    elif kind == 'rename':
+        # renameat2(AT_FDCWD, src, AT_FDCWD, path, RENAME_NOREPLACE)
+        check(libc.renameat2(-100, src.encode(), -100, path.encode(), 1))
+    elif kind == 'mknod':
+        # mknod syscall on x86_64, glibc's mkfifo calls mknodat
+        check(libc.syscall(133, path.encode(), 0o10644, 0))
+    else:
+        raise ValueError(kind)
+except FileExistsError:
+    if kind == 'open-replace':
+        os.unlink(path)
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL))
+else:
+    # A held entry the service creates is one it does not see
+    if held == 'held':
+        sys.exit(1)
+if kind == 'mkdir-p':
+    open(os.path.join(path, 'file'), 'w').close()
+";
 
     /// Run `shh run` for a given command, and return generated systemd options
     fn generate_options(cmd: &[&str], run_opts: &[&str]) -> Vec<String> {
@@ -150,6 +198,26 @@ mod tests {
             eprintln!("shh run option: {}", shh_opts.join(" "));
             let sd_opts = generate_options(cmd, &shh_opts);
             let _ = systemd_run(cmd, &sd_opts, user);
+        }
+    }
+
+    /// Create an entry of a type: `file`, `dir`, `fifo`, or `symlink` to `/dev/null`
+    fn create_entry(type_: &str, path: &Path) {
+        match type_ {
+            "file" => fs::write(path, "").unwrap(),
+            "dir" => fs::create_dir(path).unwrap(),
+            "fifo" => unistd::mkfifo(path, stat::Mode::from_bits(0o666).unwrap()).unwrap(),
+            "symlink" => unix::fs::symlink("/dev/null", path).unwrap(),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Remove an entry, a directory or not
+    fn remove_entry(path: &Path) {
+        if fs::symlink_metadata(path).unwrap().is_dir() {
+            fs::remove_dir_all(path).unwrap();
+        } else {
+            fs::remove_file(path).unwrap();
         }
     }
 
@@ -669,6 +737,89 @@ ptrace(PTRACE_DETACH, target_pid)
             let _ = systemd_run(&cmd, &sd_opts, false);
             fs::remove_file(&link).unwrap();
             fs::remove_file(&renamed).unwrap();
+        }
+    }
+
+    #[test]
+    fn systemd_run_create_held() {
+        // Create an entry held directly in /tmp, which the service must see; link and rename sources are created
+        // by the command
+        for (kind, type_) in [
+            ("open", "file"),
+            ("mkdir", "dir"),
+            ("symlink", "symlink"),
+            ("link", "file"),
+            ("rename", "file"),
+            ("mknod", "fifo"),
+            ("open-replace", "file"),
+            ("mkdir-p", "dir"),
+        ] {
+            let path = format!("/tmp/shh-test-{id}", id = rand::random::<u16>());
+            let src = format!("{path}.src");
+            create_entry(type_, Path::new(&path));
+            let cmd = [
+                "python3",
+                "-c",
+                CREATE_ENTRY_SCRIPT,
+                kind,
+                &path,
+                &src,
+                "held",
+            ];
+            for shh_opts in &*ALL_SHH_RUN_OPTS {
+                eprintln!("shh run option: {opts} ({kind})", opts = shh_opts.join(" "));
+                let sd_opts = generate_options(&cmd, shh_opts);
+                let _ = fs::remove_file(&src);
+                let _ = systemd_run(&cmd, &sd_opts, false);
+                let _ = fs::remove_file(&src);
+            }
+            remove_entry(Path::new(&path));
+        }
+    }
+
+    #[test]
+    fn systemd_run_create_held_then_free() {
+        // Create an entry in /var/lib held during profiling only, a write to its directory; link and rename
+        // sources are created by the command in another directory
+        let dir = tempfile::tempdir_in("/var/lib").unwrap();
+        let src_dir = dir.path().join("src");
+        let dst_dir = dir.path().join("dst");
+        fs::create_dir(&src_dir).unwrap();
+        fs::create_dir(&dst_dir).unwrap();
+        let src = src_dir.join("file");
+        let path = dst_dir.join("entry");
+        for (kind, type_) in [
+            ("open", "file"),
+            ("open", "symlink"),
+            ("mkdir", "dir"),
+            ("symlink", "symlink"),
+            ("link", "file"),
+            ("rename", "file"),
+            ("mknod", "fifo"),
+        ] {
+            let cmd = [
+                "python3",
+                "-c",
+                CREATE_ENTRY_SCRIPT,
+                kind,
+                path.to_str().unwrap(),
+                src.to_str().unwrap(),
+                "free",
+            ];
+            for shh_opts in &*ALL_SHH_RUN_OPTS {
+                eprintln!(
+                    "shh run option: {opts} ({kind} on {type_})",
+                    opts = shh_opts.join(" ")
+                );
+                create_entry(type_, &path);
+                let sd_opts = generate_options(&cmd, shh_opts);
+                remove_entry(&path);
+                let _ = fs::remove_file(&src);
+                let _ = systemd_run(&cmd, &sd_opts, false);
+                // Created by the service
+                remove_entry(&path);
+                let _ = fs::remove_file(&src);
+            }
         }
     }
 
