@@ -810,13 +810,21 @@ impl SyscallHandler for OpenHandler {
                 flags
             };
             let flags_val = unpack_expr!(flags, Expression::Integer(flags) => &flags.value);
-            (
-                flags_val.is_flag_set("O_CREAT"),
-                flags_val.is_flag_set("O_WRONLY")
-                    || flags_val.is_flag_set("O_RDWR")
-                    || flags_val.is_flag_set("O_TRUNC"),
-                flags_val.is_flag_set("O_RDONLY") || !flags_val.is_flag_set("O_WRONLY"),
-            )
+            if flags_val.is_flag_set("O_PATH") {
+                // Lookup only, the kernel ignores the other flags
+                (false, false, true)
+            } else if flags_val.is_flag_set("O_TMPFILE") {
+                // Unnamed file in the opened directory, the returned fd path names a placeholder entry there
+                (true, false, false)
+            } else {
+                (
+                    flags_val.is_flag_set("O_CREAT"),
+                    flags_val.is_flag_set("O_WRONLY")
+                        || flags_val.is_flag_set("O_RDWR")
+                        || flags_val.is_flag_set("O_TRUNC"),
+                    flags_val.is_flag_set("O_RDONLY") || !flags_val.is_flag_set("O_WRONLY"),
+                )
+            }
         } else {
             // creat, same as O_CREAT|O_WRONLY|O_TRUNC
             (true, true, false)

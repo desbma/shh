@@ -613,6 +613,19 @@ ptrace(PTRACE_DETACH, target_pid)
     }
 
     #[test]
+    fn systemd_run_tmpfile() {
+        // Open an unnamed temporary file, a write to its directory, on the tmpfs of the test environment
+        let dir = tempfile::tempdir_in("/mnt/tmp").unwrap();
+        let cmd = [
+            "python3",
+            "-c",
+            "import os, sys; os.open(sys.argv[1], os.O_TMPFILE | os.O_RDWR)",
+            dir.path().to_str().unwrap(),
+        ];
+        profile_and_run(&cmd, false);
+    }
+
+    #[test]
     fn systemd_run_symlink() {
         // Create a symlink, a write to its directory
         let temp_dir = tempfile::tempdir_in("/var/lib").unwrap();

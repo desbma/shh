@@ -32,7 +32,7 @@ use handlers::{
 /// This does *not* map 1-1 with a syscall, and does *not* necessarily respect chronology
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum ProgramAction {
-    /// Path was created
+    /// Path was created, or stands for an unnamed file created in its parent directory
     Create(PathBuf),
     /// Path was exec'd
     Exec(PathBuf),
@@ -1266,6 +1266,58 @@ mod tests {
                 .concat()
             );
         }
+    }
+
+    #[test]
+    fn open_tmpfile_creates_in_dir() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        // glibc's tmpfile()
+        let syscalls = [Ok(SyscallItem::Complete(Box::new(Syscall {
+            ret_val: Some(IntegerExpression {
+                value: IntegerExpressionValue::Literal(3),
+                metadata: Some(b"/tmp/#80".to_vec()),
+            }),
+            ..make_syscall(
+                "openat",
+                vec![
+                    named_symbol("AT_FDCWD"),
+                    buf_expr(b"/tmp"),
+                    binary_or_flags(&["O_RDWR", "O_CLOEXEC", "O_TMPFILE"]),
+                    int_literal(0o600),
+                ],
+                3,
+            )
+        })))];
+        assert_eq!(
+            summarize(syscalls, &[], program_state()).unwrap(),
+            vec![
+                ProgramAction::Create("/tmp/#80".into()),
+                ProgramAction::Syscalls(["openat".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn open_path_ignores_tmpfile() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let syscalls = [Ok(syscall(
+            "openat",
+            vec![
+                named_symbol("AT_FDCWD"),
+                buf_expr(b"/tmp/cache"),
+                binary_or_flags(&["O_RDWR", "O_CLOEXEC", "O_PATH", "O_TMPFILE"]),
+                int_literal(0o777),
+            ],
+        ))];
+        assert_eq!(
+            summarize(syscalls, &[], program_state()).unwrap(),
+            vec![
+                ProgramAction::Read("/tmp/cache".into()),
+                ProgramAction::Syscalls(["openat".into()].into()),
+            ]
+        );
     }
 
     #[test]

@@ -44,6 +44,8 @@ readonly VMRESULT="/src/test-env/.vmtest-$$"
         esac
     done
     echo 'systemctl start systemd-networkd.service systemd-resolved.service systemd-logind.service systemd-machined.service'
+    # For tests needing filesystem features the virtiofs root lacks, like O_TMPFILE
+    echo 'mkdir -p /mnt/tmp && mount -t tmpfs tmpfs /mnt/tmp'
     printf 'mkdir -p %q\nexec %s >%q/stdout 2>%q/stderr\n' \
         "${VMRESULT}" "$(printf '%q ' "$@")" "${VMRESULT}" "${VMRESULT}"
 } | sudo tee "${EPHEMERAL}/merged/root/vmtest.sh" > /dev/null
