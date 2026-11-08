@@ -52,6 +52,8 @@ pub(crate) enum ProgramAction {
     Read(PathBuf),
     /// Path was removed
     Remove(PathBuf),
+    /// Paths a link or rename needs on the same mount
+    RequireSameMount(PathBuf, PathBuf),
     /// Set privileged timer alarm
     SetAlarm,
     /// Set scheduler to a real time one
@@ -939,6 +941,10 @@ mod tests {
                 ProgramAction::Write(temp_dir_src.path().join("a")),
                 ProgramAction::Create(temp_dir_dst.path().join("b")),
                 ProgramAction::Write(temp_dir_dst.path().join("b")),
+                ProgramAction::RequireSameMount(
+                    temp_dir_src.path().to_owned(),
+                    temp_dir_dst.path().to_owned()
+                ),
                 ProgramAction::Syscalls(["renameat".into()].into()),
                 ProgramAction::Read("/path/from/env/1".into()),
                 ProgramAction::Read("/path/from/env/2".into()),
@@ -1388,16 +1394,20 @@ mod tests {
                 vec![buf_expr(b"/src"), dir_fd.clone(), buf_expr(b"link_dir/new")],
             ),
         ] {
-            // A hard link also reads its source
-            let old = matches!(name, "link" | "linkat").then(|| ProgramAction::Read("/src".into()));
+            // A hard link also reads its source, and needs it on the mount of the new entry's directory
+            let hard_link = matches!(name, "link" | "linkat");
+            let old = hard_link.then(|| ProgramAction::Read("/src".into()));
+            let same_mount = hard_link
+                .then(|| ProgramAction::RequireSameMount("/src".into(), target_dir.clone()));
             assert_eq!(
                 summarize([Ok(syscall(name, args))], &[], program_state()).unwrap(),
                 old.into_iter()
                     .chain([
                         ProgramAction::Read(link_dir.clone()),
                         ProgramAction::Create(target_dir.join("new")),
-                        ProgramAction::Syscalls([name.into()].into()),
                     ])
+                    .chain(same_mount)
+                    .chain([ProgramAction::Syscalls([name.into()].into())])
                     .collect::<Vec<_>>()
             );
         }
@@ -1424,7 +1434,7 @@ mod tests {
                 flags,
             ]
         };
-        for (name, args, old_actions) in [
+        for (name, args, old_actions, old) in [
             (
                 "link",
                 vec![
@@ -1432,11 +1442,13 @@ mod tests {
                     buf_expr(new.as_os_str().as_bytes()),
                 ],
                 vec![ProgramAction::Read(link.clone())],
+                &link,
             ),
             (
                 "linkat",
                 linkat(&dir_fd, b"link", int_literal(0)),
                 vec![ProgramAction::Read(link.clone())],
+                &link,
             ),
             (
                 "linkat",
@@ -1445,16 +1457,19 @@ mod tests {
                     ProgramAction::Read(link.clone()),
                     ProgramAction::Read(target.clone()),
                 ],
+                &target,
             ),
             (
                 "linkat",
                 linkat(&target_fd, b"", named_symbol("AT_EMPTY_PATH")),
                 vec![ProgramAction::Read(target.clone())],
+                &target,
             ),
         ] {
             let mut expected = old_actions;
             expected.extend([
                 ProgramAction::Create(new.clone()),
+                ProgramAction::RequireSameMount(old.clone(), temp_dir.path().to_owned()),
                 ProgramAction::Syscalls([name.into()].into()),
             ]);
             assert_eq!(
@@ -1515,6 +1530,40 @@ mod tests {
     }
 
     #[test]
+    fn rename_requires_same_mount() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src_dir = temp_dir.path().join("src_dir");
+        let src_dir_link = temp_dir.path().join("src_dir_link");
+        let other_dir = temp_dir.path().join("other_dir");
+        fs::create_dir(&src_dir).unwrap();
+        fs::create_dir(&other_dir).unwrap();
+        unix::fs::symlink(&src_dir, &src_dir_link).unwrap();
+        unix::fs::symlink(other_dir.join("target"), src_dir.join("old")).unwrap();
+        let new = temp_dir.path().join("new");
+        let args = vec![
+            named_symbol("AT_FDCWD"),
+            buf_expr(src_dir_link.join("old").as_os_str().as_bytes()),
+            named_symbol("AT_FDCWD"),
+            buf_expr(new.as_os_str().as_bytes()),
+        ];
+        assert_eq!(
+            summarize([Ok(syscall("renameat", args))], &[], program_state()).unwrap(),
+            vec![
+                ProgramAction::Read(src_dir_link.clone()),
+                ProgramAction::Read(src_dir.join("old")),
+                ProgramAction::Read(other_dir.join("target")),
+                ProgramAction::Write(other_dir.join("target")),
+                ProgramAction::Create(new.clone()),
+                ProgramAction::Write(new),
+                ProgramAction::RequireSameMount(src_dir, temp_dir.path().to_path_buf()),
+                ProgramAction::Syscalls(["renameat".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
     fn create_symlink_no_follow() {
         let _ = simple_logger::SimpleLogger::new().init();
 
@@ -1557,15 +1606,18 @@ mod tests {
                 vec![dir_fd.clone(), buf_expr(b"link/"), int_literal(0o755)],
             ),
         ] {
-            // A hard link also reads its source
-            let old = matches!(name, "link" | "linkat").then(|| ProgramAction::Read("/src".into()));
+            // A hard link also reads its source, and needs it on the mount of the new entry's directory
+            let hard_link = matches!(name, "link" | "linkat");
+            let old = hard_link.then(|| ProgramAction::Read("/src".into()));
+            let same_mount = hard_link.then(|| {
+                ProgramAction::RequireSameMount("/src".into(), temp_dir.path().to_owned())
+            });
             assert_eq!(
                 summarize([Ok(syscall(name, args))], &[], program_state()).unwrap(),
                 old.into_iter()
-                    .chain([
-                        ProgramAction::Create(link.clone()),
-                        ProgramAction::Syscalls([name.into()].into()),
-                    ])
+                    .chain([ProgramAction::Create(link.clone())])
+                    .chain(same_mount)
+                    .chain([ProgramAction::Syscalls([name.into()].into())])
                     .collect::<Vec<_>>()
             );
         }

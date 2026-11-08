@@ -886,7 +886,12 @@ impl SyscallHandler for RenameHandler {
             None => false,
         };
 
+        // The directories, taken before following the final components, need the same mount
+        traverse_parent_symlinks(&mut path_src, actions);
+        let dir_src = path_src.parent().map(Path::to_path_buf);
         traverse_symlinks(&mut path_src, actions);
+        traverse_parent_symlinks(&mut path_dst, actions);
+        let dir_dst = path_dst.parent().map(Path::to_path_buf);
         traverse_symlinks(&mut path_dst, actions);
         actions.push(ProgramAction::Read(path_src.clone()));
         actions.push(ProgramAction::Write(path_src.clone()));
@@ -896,6 +901,9 @@ impl SyscallHandler for RenameHandler {
             actions.push(ProgramAction::Create(path_dst.clone()));
         }
         actions.push(ProgramAction::Write(path_dst.clone()));
+        if let (Some(dir_src), Some(dir_dst)) = (dir_src, dir_dst) {
+            actions.push(ProgramAction::RequireSameMount(dir_src, dir_dst));
+        }
         Ok(())
     }
 }
@@ -1176,13 +1184,14 @@ pub(crate) struct PathHandler {
     pub action: fn(PathBuf) -> ProgramAction,
 }
 
-impl SyscallHandler for PathHandler {
-    fn handle(
+impl PathHandler {
+    /// Push the action on the syscall path, and return that path
+    fn handle_path(
         &self,
         sc: &Syscall,
         actions: &mut Vec<ProgramAction>,
-        state: &mut ProgramState,
-    ) -> Result<(), HandlerError> {
+        state: &ProgramState,
+    ) -> Result<Option<PathBuf>, HandlerError> {
         let relfd = self.relfd.extract(sc)?;
         let path = self.path.extract(sc)?;
 
@@ -1198,7 +1207,7 @@ impl SyscallHandler for PathHandler {
             }) if s == "NULL" => {
                 // Without a descriptor path, the call fails or changes nothing
                 if relfd.and_then(Expression::metadata).is_none() {
-                    return Ok(());
+                    return Ok(None);
                 }
                 PathBuf::new()
             }
@@ -1230,27 +1239,39 @@ impl SyscallHandler for PathHandler {
         // A descriptor path is already resolved, and may designate a symlink itself
         let traverse = !path_bytes.is_empty();
 
-        if let Some(mut path) = resolve_path(&path, relfd, state.cur_dir.as_ref()) {
-            if traverse {
-                if follow {
-                    traverse_symlinks(&mut path, actions);
-                } else {
-                    traverse_parent_symlinks(&mut path, actions);
-                }
-            }
-            // An entry creation or removal failing on an existing symlink, like a creation with EEXIST,
-            // wrote nothing but depends on it
-            let action = if matches!(self.follow, FollowSymlink::Never)
-                && sc.ret_val.as_ref().and_then(IntegerExpression::value) == Some(-1)
-                && path.is_symlink()
-            {
-                ProgramAction::Read
+        let Some(mut path) = resolve_path(&path, relfd, state.cur_dir.as_ref()) else {
+            return Ok(None);
+        };
+        if traverse {
+            if follow {
+                traverse_symlinks(&mut path, actions);
             } else {
-                self.action
-            };
-            actions.push(action(path));
+                traverse_parent_symlinks(&mut path, actions);
+            }
         }
-        Ok(())
+        // An entry creation or removal failing on an existing symlink, like a creation with EEXIST,
+        // wrote nothing but depends on it
+        let action = if matches!(self.follow, FollowSymlink::Never)
+            && sc.ret_val.as_ref().and_then(IntegerExpression::value) == Some(-1)
+            && path.is_symlink()
+        {
+            ProgramAction::Read
+        } else {
+            self.action
+        };
+        actions.push(action(path.clone()));
+        Ok(Some(path))
+    }
+}
+
+impl SyscallHandler for PathHandler {
+    fn handle(
+        &self,
+        sc: &Syscall,
+        actions: &mut Vec<ProgramAction>,
+        state: &mut ProgramState,
+    ) -> Result<(), HandlerError> {
+        self.handle_path(sc, actions, state).map(|_| ())
     }
 }
 
@@ -1267,8 +1288,15 @@ impl SyscallHandler for LinkHandler {
         actions: &mut Vec<ProgramAction>,
         state: &mut ProgramState,
     ) -> Result<(), HandlerError> {
-        self.old.handle(sc, actions, state)?;
-        self.new.handle(sc, actions, state)
+        let old = self.old.handle_path(sc, actions, state)?;
+        let new = self.new.handle_path(sc, actions, state)?;
+        // A successful link needs its old path on the mount of the new path's directory
+        if sc.ret_val.as_ref().and_then(IntegerExpression::value) != Some(-1)
+            && let (Some(old), Some(new_dir)) = (old, new.as_deref().and_then(Path::parent))
+        {
+            actions.push(ProgramAction::RequireSameMount(old, new_dir.to_owned()));
+        }
+        Ok(())
     }
 }
 
@@ -3671,7 +3699,8 @@ x86_Thread_features_locked:
                 ProgramAction::Read("/tmp/old".into()),
                 ProgramAction::Write("/tmp/old".into()),
                 ProgramAction::Create("/tmp/new".into()),
-                ProgramAction::Write("/tmp/new".into())
+                ProgramAction::Write("/tmp/new".into()),
+                ProgramAction::RequireSameMount("/tmp".into(), "/tmp".into())
             ]
         );
     }
@@ -3706,7 +3735,8 @@ x86_Thread_features_locked:
                 ProgramAction::Read("/old".into()),
                 ProgramAction::Write("/old".into()),
                 ProgramAction::Create("/new".into()),
-                ProgramAction::Write("/new".into())
+                ProgramAction::Write("/new".into()),
+                ProgramAction::RequireSameMount("/".into(), "/".into())
             ]
         );
     }
@@ -3740,7 +3770,8 @@ x86_Thread_features_locked:
                 ProgramAction::Read("/tmp/a".into()),
                 ProgramAction::Write("/tmp/a".into()),
                 ProgramAction::Read("/tmp/b".into()),
-                ProgramAction::Write("/tmp/b".into())
+                ProgramAction::Write("/tmp/b".into()),
+                ProgramAction::RequireSameMount("/tmp".into(), "/tmp".into())
             ]
         );
     }

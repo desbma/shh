@@ -21,7 +21,7 @@ use crate::{
             DeniableAction, DenySyscalls, EmptyPathDescription, ListMode, OptionContext,
             OptionEffect, OptionUpdater, OptionValue, OptionValueDescription, OptionValueEffect,
             OptionWithValue, PathDescription, PathMount, SYSCALL_CLASSES, action_path_exception,
-            merge_similar_paths,
+            common_ancestor, merge_similar_paths,
         },
     },
 };
@@ -578,14 +578,16 @@ impl OptionUpdater for ReadOnlyPaths {
             ProgramAction::Create(action_path) | ProgramAction::Remove(action_path) => {
                 action_path.parent()?.to_owned()
             }
+            ProgramAction::RequireSameMount(path1, path2) => common_ancestor(path1, path2)?,
             _ => return None,
         };
         match cur_effect {
             OptionValueEffect::DenyWrite(PathDescription::Base { base, exceptions })
                 if action_path != Path::new("/") =>
             {
-                let mut new_exceptions = Vec::with_capacity(exceptions.len() + 1);
-                new_exceptions.extend(exceptions.iter().cloned());
+                // Exceptions below the new one are redundant
+                let mut new_exceptions = exceptions.clone();
+                new_exceptions.retain(|e| !e.starts_with(&action_path));
                 new_exceptions.push(action_path);
                 Some(OptionValueEffect::DenyWrite(PathDescription::Base {
                     base: base.to_owned(),
@@ -724,6 +726,9 @@ impl OptionUpdater for InaccessiblePaths {
                 ProgramAction::Create(action_path) | ProgramAction::Remove(action_path) => {
                     (action_path.parent().map(Path::to_path_buf)?, false)
                 }
+                ProgramAction::RequireSameMount(path1, path2) => {
+                    (common_ancestor(path1, path2)?, false)
+                }
                 _ => return None,
             };
             match cur_effect {
@@ -770,6 +775,8 @@ impl OptionUpdater for InaccessiblePaths {
                         if action_ro {
                             new_exceptions_ro.push(new_exception_path);
                         } else {
+                            // Exceptions below the new one are redundant
+                            new_exceptions_rw.retain(|e| !e.starts_with(&new_exception_path));
                             new_exceptions_rw.push(new_exception_path);
                         }
                     }
@@ -912,16 +919,19 @@ impl OptionUpdater for NoExecPaths {
         action: &ProgramAction,
         _opts: &HardeningOptions,
     ) -> Option<OptionValueEffect> {
-        let ProgramAction::Exec(action_path) = action else {
-            return None;
+        let action_path = match action {
+            ProgramAction::Exec(action_path) => action_path.to_owned(),
+            ProgramAction::RequireSameMount(path1, path2) => common_ancestor(path1, path2)?,
+            _ => return None,
         };
         match cur_effect {
             OptionValueEffect::DenyExec(PathDescription::Base { base, exceptions })
                 if action_path != Path::new("/") =>
             {
-                let mut new_exceptions = Vec::with_capacity(exceptions.len() + 1);
-                new_exceptions.extend(exceptions.iter().cloned());
-                new_exceptions.push(action_path.to_owned());
+                // Exceptions below the new one are redundant
+                let mut new_exceptions = exceptions.clone();
+                new_exceptions.retain(|e| !e.starts_with(&action_path));
+                new_exceptions.push(action_path);
                 Some(OptionValueEffect::DenyExec(PathDescription::Base {
                     base: base.to_owned(),
                     exceptions: new_exceptions,

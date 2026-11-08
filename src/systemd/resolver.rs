@@ -37,10 +37,12 @@ impl OptionValueEffect {
                             .parent()
                             .is_none_or(|pap| !ro_paths.matches(pap))
                 }
+                ProgramAction::RequireSameMount(a, b) => !ro_paths.splits_mount(a, b),
                 _ => true,
             },
             OptionValueEffect::DenyExec(noexec_paths) => match action {
                 ProgramAction::Exec(path_action) => !noexec_paths.matches(path_action),
+                ProgramAction::RequireSameMount(a, b) => !noexec_paths.splits_mount(a, b),
                 _ => true,
             },
             OptionValueEffect::EmptyPath(empty_paths) => match action {
@@ -68,6 +70,7 @@ impl OptionValueEffect {
                                         .contains(&ProgramAction::Create(pap.to_path_buf()))
                             }))
                 }
+                ProgramAction::RequireSameMount(a, b) => !empty_paths.splits_mount(a, b),
                 _ => true,
             },
             OptionValueEffect::RemovePath(removed_paths) => match action {
@@ -76,6 +79,7 @@ impl OptionValueEffect {
                 | ProgramAction::Exec(path_action)
                 | ProgramAction::Create(path_action)
                 | ProgramAction::Remove(path_action) => !removed_paths.matches(path_action),
+                ProgramAction::RequireSameMount(a, b) => !removed_paths.splits_mount(a, b),
                 _ => true,
             },
             OptionValueEffect::DenySyscalls(denied) => {
@@ -191,25 +195,38 @@ fn actions_compatible(
     hardening_opts: &HardeningOptions,
 ) -> ActionOptionEffectCompatibility {
     let mut changed_desc: Option<Box<ChangedOptionValueDescription>> = None;
-    for i in 0..actions.len() {
-        let cur_eff = changed_desc.as_ref().map_or(eff, |d| &d.effect);
-        #[expect(clippy::unwrap_used, clippy::indexing_slicing)]
-        let (cur_action, previous_actions) = actions[..=i].split_last().unwrap();
-        match cur_eff.compatible(cur_action, previous_actions, updater, hardening_opts) {
-            ActionOptionEffectCompatibility::Compatible => {}
-            ActionOptionEffectCompatibility::CompatibleIfChanged(new_desc) => {
-                log::debug!(
-                    "Option effect {:?} is incompatible with {:?}, changing effect to {:?}",
-                    cur_eff,
-                    cur_action,
-                    new_desc.effect
-                );
-                changed_desc = Some(new_desc);
+    let mut start = 0;
+    loop {
+        let mut changed = false;
+        for i in start..actions.len() {
+            let cur_eff = changed_desc.as_ref().map_or(eff, |d| &d.effect);
+            #[expect(clippy::unwrap_used, clippy::indexing_slicing)]
+            let (cur_action, previous_actions) = actions[..=i].split_last().unwrap();
+            match cur_eff.compatible(cur_action, previous_actions, updater, hardening_opts) {
+                ActionOptionEffectCompatibility::Compatible => {}
+                ActionOptionEffectCompatibility::CompatibleIfChanged(new_desc) => {
+                    log::debug!(
+                        "Option effect {:?} is incompatible with {:?}, changing effect to {:?}",
+                        cur_eff,
+                        cur_action,
+                        new_desc.effect
+                    );
+                    changed_desc = Some(new_desc);
+                    changed = true;
+                }
+                ActionOptionEffectCompatibility::Incompatible => {
+                    log::debug!("Option effect {cur_eff:?} is incompatible with {cur_action:?}");
+                    return ActionOptionEffectCompatibility::Incompatible;
+                }
             }
-            ActionOptionEffectCompatibility::Incompatible => {
-                log::debug!("Option effect {cur_eff:?} is incompatible with {cur_action:?}");
-                return ActionOptionEffectCompatibility::Incompatible;
-            }
+        }
+        // A mount added for an action can split the paths of a mount requirement checked before it
+        match actions
+            .iter()
+            .position(|a| matches!(a, ProgramAction::RequireSameMount(..)))
+        {
+            Some(first_requirement) if changed => start = first_requirement,
+            _ => break,
         }
     }
 
@@ -331,6 +348,10 @@ pub(crate) fn resolve(
     actions: &[ProgramAction],
     hardening_opts: &HardeningOptions,
 ) -> Vec<OptionWithValue<&'static str>> {
+    // Mount requirements are checked once all other actions have set the mounts
+    let mut actions = actions.to_vec();
+    actions.sort_by_key(|a| matches!(a, ProgramAction::RequireSameMount(..)));
+
     let mut resolved_opts = Vec::new();
     for opt in opts {
         // Options are in the less to most restrictive order,
@@ -345,7 +366,7 @@ pub(crate) fn resolve(
                     break;
                 }
                 OptionEffect::Simple(effect) => {
-                    match actions_compatible(effect, actions, opt.updater, hardening_opts) {
+                    match actions_compatible(effect, &actions, opt.updater, hardening_opts) {
                         ActionOptionEffectCompatibility::Compatible => {
                             resolved_opts.push(OptionWithValue {
                                 name: opt.name,
@@ -366,7 +387,7 @@ pub(crate) fn resolve(
                             opt.name,
                             lv,
                             effects,
-                            actions,
+                            &actions,
                             opt.updater,
                             hardening_opts,
                         ) {
@@ -394,17 +415,33 @@ pub(crate) fn resolve(
     // A path is read-only when a read-only path sits between it and its closest writable ancestor (both included),
     // so writable paths are merged first, never into the ancestors of a read-only path with a writable path below,
     // then read-only paths, never between a writable path and its closest merged writable ancestor.
+    // No merge result may separate paths that need the same mount.
     // Note: this can still simplify paths to a point where that negates another option of the same mount kind, for
     // example:
     // TemporaryFileSystem=/dev:ro
     // BindReadOnlyPaths=/dev
     let threshold = hardening_opts.merge_paths_threshold;
+    let split_paths: HashSet<PathBuf> = actions
+        .iter()
+        .filter_map(|a| match a {
+            ProgramAction::RequireSameMount(path1, path2) => Some((path1, path2)),
+            _ => None,
+        })
+        .flat_map(|(path1, path2)| {
+            path1
+                .ancestors()
+                .chain(path2.ancestors())
+                .filter(|p| path1.starts_with(p) != path2.starts_with(p))
+                .map(Path::to_path_buf)
+        })
+        .collect();
     let ro_paths = mount_paths(&resolved_opts, PathMount::ReadOnly);
     let rw_paths = mount_paths(&resolved_opts, PathMount::Writable);
     let rw_forbidden = ro_paths
         .iter()
         .filter(|ro| rw_paths.iter().any(|rw| rw.starts_with(ro)))
         .flat_map(|ro| ro.ancestors().map(Path::to_path_buf))
+        .chain(split_paths.iter().cloned())
         .collect();
     merge_mount_paths(
         &mut resolved_opts,
@@ -420,6 +457,7 @@ pub(crate) fn resolve(
                 .take_while_inclusive(|p| !merged_rw_paths.contains(*p))
                 .map(Path::to_path_buf)
         })
+        .chain(split_paths.iter().cloned())
         .collect();
     merge_mount_paths(
         &mut resolved_opts,
@@ -431,7 +469,7 @@ pub(crate) fn resolve(
         &mut resolved_opts,
         PathMount::Other,
         threshold,
-        &HashSet::new(),
+        &split_paths,
     );
 
     // Deduplicate
@@ -714,6 +752,104 @@ mod tests {
             format!("ReadWritePaths=-{}", temp_dir.path().to_str().unwrap())
         );
         assert_eq!(candidates[2].to_string(), "PrivateMounts=true");
+    }
+
+    #[test]
+    fn resolve_link_same_mount() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let link = |old: &str, new: &str| {
+            let new = PathBuf::from(new);
+            [
+                ProgramAction::Read(old.into()),
+                ProgramAction::Create(new.clone()),
+                ProgramAction::RequireSameMount(old.into(), new.parent().unwrap().to_owned()),
+            ]
+        };
+        let rename_created = [
+            ProgramAction::Create("/var/tmp/f".into()),
+            ProgramAction::Read("/var/tmp/f".into()),
+            ProgramAction::Write("/var/tmp/f".into()),
+            ProgramAction::Create("/var/lib/f".into()),
+            ProgramAction::Write("/var/lib/f".into()),
+            ProgramAction::RequireSameMount("/var/tmp".into(), "/var/lib".into()),
+        ];
+        let mut link_executed = link("/tmp/tree/bin/tool", "/tmp/tree/old/tool").to_vec();
+        link_executed.push(ProgramAction::Exec("/tmp/tree/bin/tool".into()));
+        // The exception widened for the executed file's link splits the other link if checked first
+        let link_out = link("/tmp/tree/data/f", "/tmp/out/f");
+        let link_out_first = [&link_out[..], &link_executed].concat();
+        let link_out_last = [&link_executed[..], &link_out].concat();
+        for (standard, names, actions, expected) in [
+            (
+                true,
+                &["ProtectSystem"][..],
+                &link("/etc/f", "/var/lib/f")[..],
+                &["ProtectSystem=true"][..],
+            ),
+            (true, &["PrivateTmp"], &rename_created, &[]),
+            (
+                false,
+                &["ReadOnlyPaths"],
+                &link("/tmp/tree/source/f", "/tmp/tree/destination/f"),
+                &[
+                    "ReadOnlyPaths=-/",
+                    "ReadWritePaths=-/tmp/tree",
+                    "PrivateMounts=true",
+                ],
+            ),
+            (
+                false,
+                &["ReadOnlyPaths"],
+                &link("/etc/f", "/var/lib/f"),
+                &[],
+            ),
+            (
+                false,
+                &["InaccessiblePaths"],
+                &link("/tmp/tree/source/f", "/tmp/tree/destination/f"),
+                &[
+                    "TemporaryFileSystem=/:ro",
+                    "BindPaths=-/tmp/tree",
+                    "PrivateMounts=true",
+                ],
+            ),
+            (
+                false,
+                &["NoExecPaths"],
+                &link_executed,
+                &[
+                    "NoExecPaths=-/",
+                    "ExecPaths=-/tmp/tree",
+                    "PrivateMounts=true",
+                ],
+            ),
+            (
+                false,
+                &["NoExecPaths"],
+                &link_out_first,
+                &["NoExecPaths=-/", "ExecPaths=-/tmp", "PrivateMounts=true"],
+            ),
+            (
+                false,
+                &["NoExecPaths"],
+                &link_out_last,
+                &["NoExecPaths=-/", "ExecPaths=-/tmp", "PrivateMounts=true"],
+            ),
+        ] {
+            let (opts, hardening_opts) = if standard {
+                test_options_standard(names)
+            } else {
+                test_options_strict(names)
+            };
+            assert_eq!(
+                resolve(&opts, actions, &hardening_opts)
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
     }
 
     #[test]
@@ -1015,6 +1151,79 @@ mod tests {
                 "ExecPaths=-/usr/x",
             ]
         );
+    }
+
+    #[test]
+    fn resolve_merge_paths_same_mount() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let actions = [
+            ProgramAction::Exec("/tmp/tree/source/a".into()),
+            ProgramAction::Exec("/tmp/tree/source/b".into()),
+            ProgramAction::Exec("/tmp/tree/source/c".into()),
+            ProgramAction::Read("/tmp/tree/source/f".into()),
+            ProgramAction::Create("/tmp/tree/destination/f".into()),
+            ProgramAction::RequireSameMount(
+                "/tmp/tree/source/f".into(),
+                "/tmp/tree/destination".into(),
+            ),
+        ];
+        assert_eq!(
+            resolve_merged_paths(&["ReadOnlyPaths", "NoExecPaths"], &actions),
+            [
+                "ReadOnlyPaths=-/",
+                "ReadWritePaths=-/tmp/tree",
+                "PrivateMounts=true",
+                "NoExecPaths=-/",
+                "ExecPaths=-/tmp/tree",
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_merge_bind_paths_same_mount() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        for (access, expected) in [
+            (
+                ProgramAction::Read as fn(PathBuf) -> ProgramAction,
+                "BindReadOnlyPaths=-/tree/source/a -/tree/source/b -/tree/source/c",
+            ),
+            (
+                ProgramAction::Write,
+                "BindPaths=-/tree/source/a -/tree/source/b -/tree/source/c",
+            ),
+        ] {
+            let mut actions: Vec<_> = ["a", "b", "c"]
+                .iter()
+                .map(|n| access(Path::new("/tree/source").join(n)))
+                .collect();
+            actions.extend(
+                ["/tree", "/tree/source", "/out", "/tree/source/f", "/out/f"]
+                    .map(|p| ProgramAction::Create(p.into())),
+            );
+            actions.push(ProgramAction::RequireSameMount(
+                "/tree/source/f".into(),
+                "/out".into(),
+            ));
+            assert_eq!(
+                resolve_merged_paths(&["InaccessiblePaths"], &actions),
+                ["TemporaryFileSystem=/", expected, "PrivateMounts=true"]
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_link_same_mount_ro_exception() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let actions = [
+            ProgramAction::Read("/".into()),
+            ProgramAction::Read("/tmp/source".into()),
+            ProgramAction::Create("/tmp/link".into()),
+            ProgramAction::RequireSameMount("/tmp/source".into(), "/tmp".into()),
+        ];
+        assert!(resolve_merged_paths(&["InaccessiblePaths"], &actions).is_empty());
     }
 
     #[test]

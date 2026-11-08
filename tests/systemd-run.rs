@@ -572,13 +572,41 @@ ptrace(PTRACE_DETACH, target_pid)
         let src = tempfile::NamedTempFile::new_in("/tmp").unwrap();
         let dst = src.path().with_extension("dst");
         let cmd = ["ln", src.path().to_str().unwrap(), dst.to_str().unwrap()];
-        // Whitelist mode still puts the link endpoints on different mounts, or makes /tmp read-only
-        for shh_opts in ALL_SHH_RUN_OPTS.iter().filter(|o| !o.contains(&"-w")) {
+        for shh_opts in &*ALL_SHH_RUN_OPTS {
             eprintln!("shh run option: {}", shh_opts.join(" "));
             let sd_opts = generate_options(&cmd, shh_opts);
             fs::remove_file(&dst).unwrap();
             let _ = systemd_run(&cmd, &sd_opts, false);
             fs::remove_file(&dst).unwrap();
+        }
+    }
+
+    #[test]
+    fn systemd_run_link_rename_across_mounts() {
+        // Hard link a pre-existing /etc file into /var/lib, and rename a file created in /var/tmp into /var/lib,
+        // through Python as `mv` falls back to copying when the directories are on different mounts
+        let src = tempfile::NamedTempFile::new_in("/etc").unwrap();
+        let dst_dir = tempfile::tempdir_in("/var/lib").unwrap();
+        let link = dst_dir.path().join("link");
+        let created = format!("/var/tmp/shh-test-{}", rand::random::<u16>());
+        let renamed = dst_dir.path().join("renamed");
+        let cmd = [
+            "python3",
+            "-c",
+            "import os, sys; os.link(sys.argv[1], sys.argv[2]); open(sys.argv[3], 'w').close(); os.rename(sys.argv[3], sys.argv[4])",
+            src.path().to_str().unwrap(),
+            link.to_str().unwrap(),
+            &created,
+            renamed.to_str().unwrap(),
+        ];
+        for shh_opts in &*ALL_SHH_RUN_OPTS {
+            eprintln!("shh run option: {}", shh_opts.join(" "));
+            let sd_opts = generate_options(&cmd, shh_opts);
+            fs::remove_file(&link).unwrap();
+            fs::remove_file(&renamed).unwrap();
+            let _ = systemd_run(&cmd, &sd_opts, false);
+            fs::remove_file(&link).unwrap();
+            fs::remove_file(&renamed).unwrap();
         }
     }
 

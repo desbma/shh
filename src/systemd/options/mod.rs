@@ -228,6 +228,19 @@ impl PathDescription {
             PathDescription::Pattern(r) => r.is_match(path.as_os_str().as_bytes()),
         }
     }
+
+    /// Check whether mounts of the described paths put two paths on different mounts
+    pub(crate) fn splits_mount(&self, a: &Path, b: &Path) -> bool {
+        match self {
+            PathDescription::Base { base, exceptions } => iter::once(base)
+                .chain(exceptions)
+                .any(|m| a.starts_with(m) != b.starts_with(m)),
+            // Matching paths are on a mount apart from non-matching ones
+            PathDescription::Pattern(r) => {
+                r.is_match(a.as_os_str().as_bytes()) != r.is_match(b.as_os_str().as_bytes())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -275,6 +288,14 @@ impl EmptyPathDescription {
         } else {
             !self.exceptions_rw.iter().any(|e| path.starts_with(e))
         }
+    }
+
+    /// Check whether the base or exception mounts put two paths on different mounts
+    pub(crate) fn splits_mount(&self, a: &Path, b: &Path) -> bool {
+        iter::once(&self.base)
+            .chain(&self.exceptions_ro)
+            .chain(&self.exceptions_rw)
+            .any(|m| a.starts_with(m) != b.starts_with(m))
     }
 }
 
@@ -674,6 +695,13 @@ pub(crate) fn merge_similar_paths(
             paths
         }
     }
+}
+
+/// Find the deepest common ancestor of two paths
+fn common_ancestor(a: &Path, b: &Path) -> Option<PathBuf> {
+    a.ancestors()
+        .find(|p| b.starts_with(p))
+        .map(Path::to_path_buf)
 }
 
 fn action_path_exception(action_path: PathBuf) -> PathBuf {
