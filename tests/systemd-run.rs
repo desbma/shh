@@ -285,6 +285,25 @@ mod tests {
     }
 
     #[test]
+    fn systemd_run_bind_unix() {
+        // Bind a Unix socket, a write to its directory, that clients outside the service reach
+        for dir in ["/var/lib", "/tmp"] {
+            let path = format!("{dir}/shh-test-{id}.sock", id = rand::random::<u16>());
+            let code = format!("import socket; socket.socket(socket.AF_UNIX).bind({path:?})");
+            let cmd = ["python3", "-c", &code];
+            for shh_opts in &*ALL_SHH_RUN_OPTS {
+                eprintln!("shh run option: {}", shh_opts.join(" "));
+                let _ = fs::remove_file(&path);
+                let sd_opts = generate_options(&cmd, shh_opts);
+                let _ = fs::remove_file(&path);
+                let _ = systemd_run(&cmd, &sd_opts, false);
+                assert!(fs::exists(&path).unwrap());
+                fs::remove_file(&path).unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn systemd_run_sock_packet() {
         let cmd = [
             "python3",

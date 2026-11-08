@@ -953,55 +953,66 @@ mod tests {
     }
 
     #[test]
-    fn connect_uds() {
+    fn connect_bind_uds() {
         let _ = simple_logger::SimpleLogger::new().init();
 
         let env_paths = [
             PathBuf::from("/path/from/env/1"),
             PathBuf::from("/path/from/env/2"),
         ];
-        let state = program_state();
+        let read = ProgramAction::Read("/run/test/sock".into());
+        let create = ProgramAction::Create("/run/test/sock".into());
+        for (name, path_actions) in [
+            ("connect", vec![read.clone()]),
+            ("bind", vec![read, create]),
+        ] {
+            let syscalls = [Ok(syscall(
+                name,
+                vec![
+                    int_literal(3),
+                    Expression::Struct(HashMap::from([
+                        ("sa_family".to_owned(), named_symbol("AF_UNIX")),
+                        ("sun_path".to_owned(), buf_expr(b"/run/test/sock")),
+                    ])),
+                    int_literal(17),
+                ],
+            ))];
+            let other_actions = vec![
+                ProgramAction::Syscalls([name.into()].into()),
+                ProgramAction::Read("/path/from/env/1".into()),
+                ProgramAction::Read("/path/from/env/2".into()),
+            ];
+            assert_eq!(
+                summarize(syscalls, &env_paths, program_state()).unwrap(),
+                [path_actions, other_actions].concat()
+            );
+        }
+    }
 
-        let syscalls = [Ok(SyscallItem::Complete(Box::new(Syscall {
-            pid: 598056,
-            rel_ts: 0.000036,
-            name: "connect".into(),
-            args: vec![
-                fd_expr(4, "/run/user/1000/systemd/private"),
+    #[test]
+    fn bind_abstract_uds() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let syscalls = [Ok(syscall(
+            "bind",
+            vec![
+                int_literal(3),
                 Expression::Struct(HashMap::from([
-                    (
-                        "sa_family".to_owned(),
-                        Expression::Integer(IntegerExpression {
-                            value: IntegerExpressionValue::NamedSymbol("AF_UNIX".to_owned()),
-                            metadata: None,
-                        }),
-                    ),
+                    ("sa_family".to_owned(), named_symbol("AF_UNIX")),
                     (
                         "sun_path".to_owned(),
                         Expression::Buffer(BufferExpression {
-                            value: "/run/user/1000/systemd/private".as_bytes().to_vec(),
-                            type_: BufferType::Unknown,
+                            value: b"/run/test/sock".to_vec(),
+                            type_: BufferType::AbstractPath,
                         }),
                     ),
                 ])),
-                Expression::Integer(IntegerExpression {
-                    value: IntegerExpressionValue::Literal(33),
-                    metadata: None,
-                }),
+                int_literal(17),
             ],
-            ret_val: Some(IntegerExpression {
-                value: IntegerExpressionValue::Literal(0),
-                metadata: None,
-            }),
-        })))];
+        ))];
         assert_eq!(
-            summarize(syscalls, &env_paths, state).unwrap(),
-            vec![
-                ProgramAction::Read("/run/user/1000/systemd/private".into()),
-                ProgramAction::Syscalls(["connect".into()].into()),
-                ProgramAction::Read("/path/from/env/1".into()),
-                ProgramAction::Read("/path/from/env/2".into()),
-            ]
+            summarize(syscalls, &[], program_state()).unwrap(),
+            vec![ProgramAction::Syscalls(["bind".into()].into())]
         );
     }
 

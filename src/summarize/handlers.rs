@@ -619,14 +619,14 @@ impl SyscallHandler for NetworkHandler {
             // Can be NULL in some cases, ie AF_NETLINK sockets
             return Ok(());
         };
-        #[expect(clippy::single_match)]
-        match af_str {
-            "AF_UNIX" => {
-                if let Some(path) = socket_address_uds_path(addr_struct, &state.cur_dir) {
-                    actions.push(ProgramAction::Read(path));
-                }
+        if af_str == "AF_UNIX"
+            && let Some(path) = socket_address_uds_path(addr_struct, &state.cur_dir)
+        {
+            // Peers outside the service reach the socket through its path
+            actions.push(ProgramAction::Read(path.clone()));
+            if sc.name == "bind" {
+                actions.push(ProgramAction::Create(path));
             }
-            _ => (),
         }
         let fd_val = unpack_expr!(
             fd,
