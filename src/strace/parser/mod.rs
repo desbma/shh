@@ -510,11 +510,12 @@ mod tests {
             "1       0.000001 rmdir(\"\\x2f\\x74\\x6d\\x70\\x2f\\x64\\x69\\x72\") = -1 ENOTEMPTY (Directory not empty)\n\
              1       0.000002 mkdir(\"\\x2f\\x74\\x6d\\x70\\x2f\\x61\\x62\\x73\\x65\\x6e\\x74\", 0777) = -1 ENOENT (No such file or directory)\n\
              1       0.000003 bind(3, {sa_family=AF_UNIX, sun_path=\"\\x2f\\x74\\x6d\\x70\\x2f\\x73\\x6f\\x63\\x6b\"}, 110 <unfinished ...>\n\
-             1       0.000004 <... bind resumed> ) = -1 EADDRINUSE (Address already in use)\n"
+             1       0.000004 <... bind resumed> ) = -1 EADDRINUSE (Address already in use)\n\
+             1       0.000005 removexattr(\"\\x2f\\x74\\x6d\\x70\\x2f\\x66\", \"\\x75\\x73\\x65\\x72\\x2e\\x78\") = -1 ENODATA (No data available)\n"
                 .as_bytes()
                 .to_vec(),
         );
-        let handled = HashSet::from(["bind", "mkdir", "rmdir"]);
+        let handled = HashSet::from(["bind", "mkdir", "removexattr", "rmdir"]);
         let parser = LogParser::new(Box::new(lines), None, handled).unwrap();
         let syscalls: Vec<Syscall> = parser
             .into_iter()

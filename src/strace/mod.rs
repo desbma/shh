@@ -68,11 +68,12 @@ impl Syscall {
         // so identify syscalls to retain with our own logic
 
         /// Error codes of pending calls, and of calls failing on an existing entry or address
-        const RETAINED_ERRNOS: [&str; 6] = [
+        const RETAINED_ERRNOS: [&str; 7] = [
             "EADDRINUSE",
             "EAGAIN",
             "EEXIST",
             "EINPROGRESS",
+            "ENODATA",
             "ENOTEMPTY",
             "EWOULDBLOCK",
         ];

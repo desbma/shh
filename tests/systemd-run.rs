@@ -938,6 +938,37 @@ else:
     }
 
     #[test]
+    fn systemd_run_absent_xattr() {
+        // Remove or replace an absent attribute of a file in /var/lib, which the service must see absent rather
+        // than on a read-only mount
+        // Python script expecting to fail on an absent attribute
+        let script = "
+import errno, os, sys
+
+kind, path = sys.argv[1:]
+try:
+    if kind == 'removexattr':
+        os.removexattr(path, 'user.absent')
+    elif kind == 'setxattr':
+        os.setxattr(path, 'user.absent', b'', os.XATTR_REPLACE)
+    else:
+        raise ValueError(kind)
+except OSError as e:
+    if e.errno != errno.ENODATA:
+        raise
+else:
+    sys.exit(1)
+";
+        let var_lib_dir = tempfile::tempdir_in("/var/lib").unwrap();
+        let path = var_lib_dir.path().join("file");
+        create_entry("file", &path);
+        for kind in ["removexattr", "setxattr"] {
+            let cmd = ["python3", "-c", script, kind, path.to_str().unwrap()];
+            profile_and_run(&cmd, false);
+        }
+    }
+
+    #[test]
     fn systemd_run_bind_port_in_use() {
         // Bind a port held during profiling and the run, which the service must see in use
         let script = "
