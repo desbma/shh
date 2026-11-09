@@ -1211,8 +1211,12 @@ pub(crate) enum FollowSymlink {
     Always,
     /// Only when the path ends with a slash
     OnTrailingSlash,
-    /// Unless `AT_SYMLINK_NOFOLLOW` is set in the flags argument at this index, and the path does not end with a slash
-    UnlessNoFollowFlag(usize),
+    /// Unless the no-follow flag is set in the flags argument, and the path does not end with a slash
+    UnlessNoFollowFlag {
+        /// Index of the flags argument
+        flags: usize,
+        no_follow_flag: &'static str,
+    },
     /// When `AT_SYMLINK_FOLLOW` is set in the flags argument at this index, or the path ends with a slash
     IfFollowFlag(usize),
     Never,
@@ -1260,12 +1264,15 @@ impl PathHandler {
         let follow = match self.follow {
             FollowSymlink::Always => true,
             FollowSymlink::OnTrailingSlash => trailing_slash,
-            FollowSymlink::UnlessNoFollowFlag(flags) => {
+            FollowSymlink::UnlessNoFollowFlag {
+                flags,
+                no_follow_flag,
+            } => {
                 let flags = unpack_expr!(
                     flags.extract(sc)?,
                     Expression::Integer(IntegerExpression { value, .. }) => value
                 );
-                trailing_slash || !flags.is_flag_set("AT_SYMLINK_NOFOLLOW")
+                trailing_slash || !flags.is_flag_set(no_follow_flag)
             }
             FollowSymlink::IfFollowFlag(flags) => {
                 let flags = unpack_expr!(
@@ -1316,6 +1323,65 @@ impl SyscallHandler for PathHandler {
         state: &mut ProgramState,
     ) -> Result<(), HandlerError> {
         self.handle_path(sc, actions, state).map(|_| ())
+    }
+}
+
+/// Handle file access check syscalls
+pub(crate) struct AccessHandler {
+    pub path: PathHandler,
+    pub mode: usize,
+}
+
+impl SyscallHandler for AccessHandler {
+    fn handle(
+        &self,
+        sc: &Syscall,
+        actions: &mut Vec<ProgramAction>,
+        state: &mut ProgramState,
+    ) -> Result<(), HandlerError> {
+        let mode = unpack_expr!(
+            self.mode.extract(sc)?,
+            Expression::Integer(IntegerExpression { value, .. }) => value
+        );
+        if let Some(path) = self.path.handle_path(sc, actions, state)? {
+            let file_type = path.symlink_metadata().ok().map(|m| m.file_type());
+            // A device, FIFO or socket stays writable on a read-only mount
+            if mode.is_flag_set("W_OK")
+                && file_type.is_none_or(|t| t.is_file() || t.is_dir() || t.is_symlink())
+            {
+                actions.push(ProgramAction::Write(path.clone()));
+            }
+            // Only a regular file can be executed
+            if mode.is_flag_set("X_OK") && file_type.is_none_or(|t| t.is_file()) {
+                actions.push(ProgramAction::Exec(path));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Handle `fanotify_mark` syscall
+pub(crate) struct FanotifyMarkHandler {
+    pub path: PathHandler,
+    pub flags: usize,
+}
+
+impl SyscallHandler for FanotifyMarkHandler {
+    fn handle(
+        &self,
+        sc: &Syscall,
+        actions: &mut Vec<ProgramAction>,
+        state: &mut ProgramState,
+    ) -> Result<(), HandlerError> {
+        let flags = unpack_expr!(
+            self.flags.extract(sc)?,
+            Expression::Integer(IntegerExpression { value, .. }) => value
+        );
+        // A flush removes marks without looking up the path
+        if flags.is_flag_set("FAN_MARK_FLUSH") {
+            return Ok(());
+        }
+        self.path.handle(sc, actions, state)
     }
 }
 

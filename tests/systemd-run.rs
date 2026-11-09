@@ -235,6 +235,25 @@ if kind == 'mkdir-p':
         }
     }
 
+    /// Parse the major and minor numbers of a version, like `6.12.48+deb13-amd64`
+    fn major_minor(version: &str) -> (u32, u32) {
+        let mut numbers = version.split('.').map(|n| n.parse().unwrap());
+        (numbers.next().unwrap(), numbers.next().unwrap())
+    }
+
+    /// Read the major and minor version of the running kernel
+    fn kernel_version() -> (u32, u32) {
+        major_minor(&fs::read_to_string("/proc/sys/kernel/osrelease").unwrap())
+    }
+
+    /// Read the major and minor version of strace
+    fn strace_version() -> (u32, u32) {
+        let output = Command::new("strace").arg("-V").unwrap();
+        // Like `strace -- version 6.13`
+        let first_line = output.stdout.lines().next().unwrap().unwrap();
+        major_minor(first_line.rsplit(' ').next().unwrap())
+    }
+
     #[test]
     fn systemd_run_true() {
         let cmd = ["true"];
@@ -970,9 +989,7 @@ else:
     fn systemd_run_xattrat() {
         // Set an attribute, and remove an absent one, of a file in /var/lib, with the syscalls taking a directory
         // descriptor
-        let release = fs::read_to_string("/proc/sys/kernel/osrelease").unwrap();
-        let mut version = release.split('.').map(|n| n.parse::<u32>().unwrap());
-        if (version.next().unwrap(), version.next().unwrap()) < (6, 13) {
+        if kernel_version() < (6, 13) {
             eprintln!("Kernel without setxattrat and removexattrat, skipping");
             return;
         }
@@ -997,6 +1014,121 @@ if ret < 0 and not (kind == 'removexattrat' and ctypes.get_errno() == errno.ENOD
         let file = tempfile::NamedTempFile::new_in("/var/lib").unwrap();
         for kind in ["setxattrat", "removexattrat"] {
             let cmd = ["python3", "-c", script, kind, file.path().to_str().unwrap()];
+            profile_and_run(&cmd, false);
+        }
+    }
+
+    #[test]
+    fn systemd_run_read_path() {
+        // Query a file in /var/lib, or a symlink to it, with a single syscall
+        let script = "
+import ctypes, errno, os, struct, sys
+
+kind, path = sys.argv[1:]
+libc = ctypes.CDLL(None, use_errno=True)
+libc.syscall.restype = ctypes.c_long
+p = path.encode()
+buf = ctypes.create_string_buffer(4096)
+size = ctypes.c_size_t(len(buf))
+AT_FDCWD = -100
+
+
+def check(ret, allowed_errno=None):
+    err = ctypes.get_errno()
+    if ret < 0 and err != allowed_errno:
+        raise OSError(err, os.strerror(err), path)
+    return ret
+
+
+# x86_64 syscall numbers
+if kind == 'access':
+    check(libc.syscall(21, p, os.W_OK))
+elif kind == 'faccessat':
+    check(libc.syscall(269, AT_FDCWD, p, os.W_OK))
+elif kind == 'faccessat2':
+    check(libc.syscall(439, AT_FDCWD, p, os.W_OK, 0))
+elif kind == 'fanotify_mark':
+    # FAN_REPORT_FID group, then FAN_MARK_ADD of FAN_MODIFY
+    fd = check(libc.syscall(300, 0x200, os.O_RDONLY))
+    check(libc.syscall(301, fd, 1, ctypes.c_uint64(2), AT_FDCWD, p))
+elif kind == 'file_getattr':
+    check(libc.syscall(468, AT_FDCWD, p, buf, ctypes.c_size_t(24), 0))
+elif kind == 'getxattr':
+    check(libc.syscall(191, p, b'user.absent', buf, size), errno.ENODATA)
+elif kind == 'getxattrat':
+    # struct xattr_args: value pointer, size, flags
+    args = struct.pack('QII', ctypes.addressof(buf), len(buf), 0)
+    check(libc.syscall(464, AT_FDCWD, p, 0, b'user.absent', args, ctypes.c_size_t(len(args))), errno.ENODATA)
+elif kind == 'inotify_add_watch':
+    # IN_MODIFY
+    check(libc.syscall(254, check(libc.syscall(294, 0)), p, 2))
+elif kind == 'lgetxattr':
+    check(libc.syscall(192, p, b'user.absent', buf, size), errno.ENODATA)
+elif kind == 'listxattr':
+    check(libc.syscall(194, p, buf, size))
+elif kind == 'listxattrat':
+    check(libc.syscall(465, AT_FDCWD, p, 0, buf, size))
+elif kind == 'llistxattr':
+    check(libc.syscall(195, p, buf, size))
+elif kind == 'name_to_handle_at':
+    # struct file_handle of MAX_HANDLE_SZ bytes, AT_HANDLE_FID
+    struct.pack_into('I', buf, 0, 128)
+    check(libc.syscall(303, AT_FDCWD, p, buf, ctypes.byref(ctypes.c_int()), 0x200))
+elif kind == 'name_to_handle_at-size':
+    # struct file_handle of 0 bytes, AT_HANDLE_FID
+    struct.pack_into('I', buf, 0, 0)
+    check(libc.syscall(303, AT_FDCWD, p, buf, ctypes.byref(ctypes.c_int()), 0x200), errno.EOVERFLOW)
+elif kind == 'readlink':
+    check(libc.syscall(89, p, buf, len(buf)))
+elif kind == 'readlink-file':
+    check(libc.syscall(89, p, buf, len(buf)), errno.EINVAL)
+elif kind == 'readlinkat':
+    check(libc.syscall(267, AT_FDCWD, p, buf, len(buf)))
+elif kind == 'statfs':
+    check(libc.syscall(137, p, buf))
+elif kind == 'statx':
+    # STATX_BASIC_STATS
+    check(libc.syscall(332, AT_FDCWD, p, 0, 0x7ff, buf))
+else:
+    raise ValueError(kind)
+";
+        let dir = tempfile::tempdir_in("/var/lib").unwrap();
+        let file = dir.path().join("file");
+        let link = dir.path().join("link");
+        create_entry("file", &file);
+        unix::fs::symlink("file", &link).unwrap();
+        for (kind, path) in [
+            ("access", &file),
+            ("faccessat", &file),
+            ("faccessat2", &file),
+            ("fanotify_mark", &file),
+            ("file_getattr", &file),
+            ("getxattr", &file),
+            ("getxattrat", &file),
+            ("inotify_add_watch", &file),
+            ("lgetxattr", &link),
+            ("listxattr", &file),
+            ("listxattrat", &file),
+            ("llistxattr", &link),
+            ("name_to_handle_at", &file),
+            ("name_to_handle_at-size", &file),
+            ("readlink", &link),
+            ("readlink-file", &file),
+            ("readlinkat", &link),
+            ("statfs", &file),
+            ("statx", &file),
+        ] {
+            let supported = match kind {
+                "getxattrat" | "listxattrat" => kernel_version() >= (6, 13),
+                // Decoded by strace from 6.17
+                "file_getattr" => kernel_version() >= (6, 17) && strace_version() >= (6, 17),
+                _ => true,
+            };
+            if !supported {
+                eprintln!("Kernel or strace without {kind}, skipping");
+                continue;
+            }
+            let cmd = ["python3", "-c", script, kind, path.to_str().unwrap()];
             profile_and_run(&cmd, false);
         }
     }

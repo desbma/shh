@@ -29,21 +29,26 @@ pub(crate) struct Syscall {
 
 impl Syscall {
     pub(crate) fn should_retain(&self) -> bool {
-        /// Syscalls writing to the directory of an absent entry
-        const ABSENT_ENTRY_WRITERS: [&str; 6] = [
-            "rename",
-            "renameat",
-            "renameat2",
-            "rmdir",
-            "unlink",
-            "unlinkat",
-        ];
-
         self.ret_val
             .as_ref()
             .is_none_or(Self::should_retain_ret_val)
-            || (self.errno() == Some("ENOENT")
-                && ABSENT_ENTRY_WRITERS.contains(&self.name.as_str()))
+            || self.is_path_dependent_failure()
+    }
+
+    /// Tell whether the call failed with an error that a hidden or read-only path would change
+    fn is_path_dependent_failure(&self) -> bool {
+        matches!(
+            (self.errno(), self.name.as_str()),
+            // Syscalls writing to the directory of an absent entry
+            (
+                Some("ENOENT"),
+                "rename" | "renameat" | "renameat2" | "rmdir" | "unlink" | "unlinkat"
+            )
+            // The entry exists, but is not a symlink
+            | (Some("EINVAL"), "readlink" | "readlinkat")
+            // The entry exists, but its handle exceeds the given size
+            | (Some("EOVERFLOW"), "name_to_handle_at")
+        )
     }
 
     /// Return the error name recorded for a failed call

@@ -21,11 +21,11 @@ use crate::{
 mod handlers;
 
 use handlers::{
-    ChdirHandler, Clone3Handler, EpollCtlHandler, ExecHandler, FollowSymlink, ForkHandler,
-    KillHandler, LinkHandler, MemfdCreateHandler, MknodHandler, MmapHandler, MountHandler,
-    NetworkHandler, OpenHandler, PathHandler, RenameHandler, SetSchedulerHandler,
-    SetsockoptHandler, ShmCtlHandler, SocketHandler, StatFdHandler, SyscallHandler,
-    TimerCreateHandler, UnshareHandler,
+    AccessHandler, ChdirHandler, Clone3Handler, EpollCtlHandler, ExecHandler, FanotifyMarkHandler,
+    FollowSymlink, ForkHandler, KillHandler, LinkHandler, MemfdCreateHandler, MknodHandler,
+    MmapHandler, MountHandler, NetworkHandler, OpenHandler, PathHandler, RenameHandler,
+    SetSchedulerHandler, SetsockoptHandler, ShmCtlHandler, SocketHandler, StatFdHandler,
+    SyscallHandler, TimerCreateHandler, UnshareHandler,
 };
 
 /// A high level program runtime action
@@ -281,6 +281,18 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
         let mut m: HashMap<&'static str, Box<dyn SyscallHandler>> = HashMap::new();
         m.insert("accept", Box::new(NetworkHandler { fd: 0, sockaddr: 1 }));
         m.insert("accept4", Box::new(NetworkHandler { fd: 0, sockaddr: 1 }));
+        m.insert(
+            "access",
+            Box::new(AccessHandler {
+                path: PathHandler {
+                    relfd: None,
+                    path: 0,
+                    follow: FollowSymlink::Always,
+                    action: ProgramAction::Read,
+                },
+                mode: 1,
+            }),
+        );
         m.insert("bind", Box::new(NetworkHandler { fd: 0, sockaddr: 1 }));
         m.insert(
             "chdir",
@@ -334,6 +346,48 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             }),
         );
         m.insert(
+            "faccessat",
+            Box::new(AccessHandler {
+                path: PathHandler {
+                    relfd: Some(0),
+                    path: 1,
+                    follow: FollowSymlink::Always,
+                    action: ProgramAction::Read,
+                },
+                mode: 2,
+            }),
+        );
+        m.insert(
+            "faccessat2",
+            Box::new(AccessHandler {
+                path: PathHandler {
+                    relfd: Some(0),
+                    path: 1,
+                    follow: FollowSymlink::UnlessNoFollowFlag {
+                        flags: 3,
+                        no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+                    },
+                    action: ProgramAction::Read,
+                },
+                mode: 2,
+            }),
+        );
+        m.insert(
+            "fanotify_mark",
+            Box::new(FanotifyMarkHandler {
+                path: PathHandler {
+                    relfd: Some(3),
+                    path: 4,
+                    follow: FollowSymlink::UnlessNoFollowFlag {
+                        flags: 1,
+                        no_follow_flag: "FAN_MARK_DONT_FOLLOW",
+                    },
+                    action: ProgramAction::Read,
+                },
+                flags: 1,
+            }),
+        );
+        m.insert(
             "fchdir",
             Box::new(ChdirHandler {
                 path: FdOrPath::Fd(0),
@@ -353,7 +407,10 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             Box::new(PathHandler {
                 relfd: Some(0),
                 path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag(3),
+                follow: FollowSymlink::UnlessNoFollowFlag {
+                    flags: 3,
+                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+                },
                 action: ProgramAction::Write,
             }),
         );
@@ -362,8 +419,23 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             Box::new(PathHandler {
                 relfd: Some(0),
                 path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag(4),
+                follow: FollowSymlink::UnlessNoFollowFlag {
+                    flags: 4,
+                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+                },
                 action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "file_getattr",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::UnlessNoFollowFlag {
+                    flags: 4,
+                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+                },
+                action: ProgramAction::Read,
             }),
         );
         m.insert("fork", Box::new(ForkHandler));
@@ -378,6 +450,39 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             }),
         );
         m.insert("getdents", Box::new(StatFdHandler { fd: 0 }));
+        m.insert(
+            "getxattr",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Read,
+            }),
+        );
+        m.insert(
+            "getxattrat",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::UnlessNoFollowFlag {
+                    flags: 2,
+                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+                },
+                action: ProgramAction::Read,
+            }),
+        );
+        m.insert(
+            "inotify_add_watch",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 1,
+                follow: FollowSymlink::UnlessNoFollowFlag {
+                    flags: 2,
+                    no_follow_flag: "IN_DONT_FOLLOW",
+                },
+                action: ProgramAction::Read,
+            }),
+        );
         m.insert("kill", Box::new(KillHandler { pid: 0, sig: 1 }));
         m.insert(
             "lchown",
@@ -386,6 +491,15 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
                 path: 0,
                 follow: FollowSymlink::OnTrailingSlash,
                 action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "lgetxattr",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::OnTrailingSlash,
+                action: ProgramAction::Read,
             }),
         );
         m.insert(
@@ -420,6 +534,36 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
                     follow: FollowSymlink::Never,
                     action: ProgramAction::Create,
                 },
+            }),
+        );
+        m.insert(
+            "listxattr",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Read,
+            }),
+        );
+        m.insert(
+            "listxattrat",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::UnlessNoFollowFlag {
+                    flags: 2,
+                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+                },
+                action: ProgramAction::Read,
+            }),
+        );
+        m.insert(
+            "llistxattr",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::OnTrailingSlash,
+                action: ProgramAction::Read,
             }),
         );
         m.insert(
@@ -508,6 +652,15 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             }),
         );
         m.insert(
+            "name_to_handle_at",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::IfFollowFlag(4),
+                action: ProgramAction::Read,
+            }),
+        );
+        m.insert(
             "newfstatat",
             Box::new(PathHandler {
                 relfd: Some(0),
@@ -548,6 +701,24 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
                 fd: None,
             }),
         );
+        m.insert(
+            "readlink",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::OnTrailingSlash,
+                action: ProgramAction::Read,
+            }),
+        );
+        m.insert(
+            "readlinkat",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::OnTrailingSlash,
+                action: ProgramAction::Read,
+            }),
+        );
         m.insert("recvfrom", Box::new(NetworkHandler { fd: 0, sockaddr: 4 }));
         m.insert(
             "removexattr",
@@ -563,7 +734,10 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             Box::new(PathHandler {
                 relfd: Some(0),
                 path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag(2),
+                follow: FollowSymlink::UnlessNoFollowFlag {
+                    flags: 2,
+                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+                },
                 action: ProgramAction::Write,
             }),
         );
@@ -634,7 +808,10 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             Box::new(PathHandler {
                 relfd: Some(0),
                 path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag(2),
+                follow: FollowSymlink::UnlessNoFollowFlag {
+                    flags: 2,
+                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+                },
                 action: ProgramAction::Write,
             }),
         );
@@ -646,6 +823,27 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
                 relfd: None,
                 path: 0,
                 follow: FollowSymlink::Always,
+                action: ProgramAction::Read,
+            }),
+        );
+        m.insert(
+            "statfs",
+            Box::new(PathHandler {
+                relfd: None,
+                path: 0,
+                follow: FollowSymlink::Always,
+                action: ProgramAction::Read,
+            }),
+        );
+        m.insert(
+            "statx",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::UnlessNoFollowFlag {
+                    flags: 2,
+                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+                },
                 action: ProgramAction::Read,
             }),
         );
@@ -710,7 +908,10 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             Box::new(PathHandler {
                 relfd: Some(0),
                 path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag(3),
+                follow: FollowSymlink::UnlessNoFollowFlag {
+                    flags: 3,
+                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+                },
                 action: ProgramAction::Write,
             }),
         );
@@ -2154,6 +2355,412 @@ mod tests {
                     ProgramAction::Write(target.clone()),
                     ProgramAction::Syscalls(["lchown".into()].into()),
                 ]
+            );
+        }
+    }
+
+    #[test]
+    fn read_path_follows_symlink() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let target = temp_dir.path().join("target");
+        let link = temp_dir.path().join("link");
+        File::create(&target).unwrap();
+        unix::fs::symlink(&target, &link).unwrap();
+        let link_bytes = link.as_os_str().as_bytes();
+        for (name, args) in [
+            ("access", vec![buf_expr(link_bytes), named_symbol("R_OK")]),
+            (
+                "faccessat",
+                vec![
+                    fd_expr(3, temp_dir.path()),
+                    buf_expr(b"link"),
+                    named_symbol("R_OK"),
+                ],
+            ),
+            (
+                "getxattr",
+                vec![
+                    buf_expr(link_bytes),
+                    buf_expr(b"user.test"),
+                    buf_expr(b"value"),
+                    int_literal(4096),
+                ],
+            ),
+            (
+                "listxattr",
+                vec![buf_expr(link_bytes), buf_expr(b""), int_literal(4096)],
+            ),
+            (
+                "statfs",
+                vec![
+                    buf_expr(link_bytes),
+                    Expression::Struct(HashMap::from([(
+                        "f_type".to_owned(),
+                        named_symbol("TMPFS_MAGIC"),
+                    )])),
+                ],
+            ),
+        ] {
+            assert_eq!(
+                summarize([Ok(syscall(name, args))], &[], program_state()).unwrap(),
+                vec![
+                    ProgramAction::Read(link.clone()),
+                    ProgramAction::Read(target.clone()),
+                    ProgramAction::Syscalls([name.into()].into()),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn read_symlink_no_follow() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let target = temp_dir.path().join("target");
+        let link = temp_dir.path().join("link");
+        fs::create_dir(&target).unwrap();
+        unix::fs::symlink(&target, &link).unwrap();
+        // A trailing slash follows the link
+        for (suffix, path_actions) in [
+            (&b""[..], vec![ProgramAction::Read(link.clone())]),
+            (
+                b"/",
+                vec![
+                    ProgramAction::Read(link.clone()),
+                    ProgramAction::Read(target.clone()),
+                ],
+            ),
+        ] {
+            let link_bytes = [link.as_os_str().as_bytes(), suffix].concat();
+            for (name, args) in [
+                (
+                    "lgetxattr",
+                    vec![
+                        buf_expr(&link_bytes),
+                        buf_expr(b"trusted.test"),
+                        buf_expr(b"value"),
+                        int_literal(4096),
+                    ],
+                ),
+                (
+                    "llistxattr",
+                    vec![buf_expr(&link_bytes), buf_expr(b""), int_literal(4096)],
+                ),
+                (
+                    "readlink",
+                    vec![
+                        buf_expr(&link_bytes),
+                        buf_expr(b"target"),
+                        int_literal(4096),
+                    ],
+                ),
+                (
+                    "readlinkat",
+                    vec![
+                        fd_expr(3, temp_dir.path()),
+                        buf_expr(&[&b"link"[..], suffix].concat()),
+                        buf_expr(b"target"),
+                        int_literal(4096),
+                    ],
+                ),
+            ] {
+                // Reading the directory as a symlink fails
+                let sc = if suffix.is_empty() || !name.starts_with("readlink") {
+                    make_syscall(name, args, 0)
+                } else {
+                    make_failed_syscall(name, args, "EINVAL")
+                };
+                assert_eq!(
+                    summarize_syscall(sc),
+                    [
+                        path_actions.clone(),
+                        vec![ProgramAction::Syscalls([name.into()].into())]
+                    ]
+                    .concat()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn read_symlink_follow_flags() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let target = temp_dir.path().join("target");
+        let link = temp_dir.path().join("link");
+        File::create(&target).unwrap();
+        unix::fs::symlink(&target, &link).unwrap();
+        let dir_fd = fd_expr(3, temp_dir.path());
+        for (follow, path_actions) in [
+            (false, vec![ProgramAction::Read(link.clone())]),
+            (
+                true,
+                vec![
+                    ProgramAction::Read(link.clone()),
+                    ProgramAction::Read(target.clone()),
+                ],
+            ),
+        ] {
+            // Flags with the given flag added when enabled
+            let flags_with = |base: &[&str], flag: &str, enabled: bool| {
+                let mut flags = base.to_vec();
+                flags.extend(enabled.then_some(flag));
+                match flags.as_slice() {
+                    [] => int_literal(0),
+                    [single] => named_symbol(single),
+                    _ => binary_or_flags(&flags),
+                }
+            };
+            for (name, args) in [
+                (
+                    "faccessat2",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        named_symbol("R_OK"),
+                        flags_with(&["AT_EACCESS"], "AT_SYMLINK_NOFOLLOW", !follow),
+                    ],
+                ),
+                (
+                    "fanotify_mark",
+                    vec![
+                        fd_expr(4, "anon_inode:[fanotify]"),
+                        flags_with(&["FAN_MARK_ADD"], "FAN_MARK_DONT_FOLLOW", !follow),
+                        named_symbol("FAN_MODIFY"),
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                    ],
+                ),
+                (
+                    "file_getattr",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        Expression::Struct(HashMap::from([(
+                            "fa_xflags".to_owned(),
+                            int_literal(0),
+                        )])),
+                        int_literal(24),
+                        flags_with(&[], "AT_SYMLINK_NOFOLLOW", !follow),
+                    ],
+                ),
+                (
+                    "getxattrat",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        flags_with(&[], "AT_SYMLINK_NOFOLLOW", !follow),
+                        buf_expr(b"user.test"),
+                        Expression::Struct(HashMap::from([
+                            ("value".to_owned(), buf_expr(b"value")),
+                            ("size".to_owned(), int_literal(4096)),
+                            ("flags".to_owned(), int_literal(0)),
+                        ])),
+                        int_literal(16),
+                    ],
+                ),
+                (
+                    "inotify_add_watch",
+                    vec![
+                        fd_expr(4, "anon_inode:inotify"),
+                        buf_expr(link.as_os_str().as_bytes()),
+                        flags_with(&["IN_MODIFY"], "IN_DONT_FOLLOW", !follow),
+                    ],
+                ),
+                (
+                    "listxattrat",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        flags_with(&[], "AT_SYMLINK_NOFOLLOW", !follow),
+                        buf_expr(b""),
+                        int_literal(4096),
+                    ],
+                ),
+                (
+                    "name_to_handle_at",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        Expression::Struct(HashMap::from([(
+                            "handle_type".to_owned(),
+                            int_literal(1),
+                        )])),
+                        Expression::Collection {
+                            complement: false,
+                            values: vec![(None, int_literal(42))],
+                        },
+                        flags_with(&["AT_HANDLE_FID"], "AT_SYMLINK_FOLLOW", follow),
+                    ],
+                ),
+                (
+                    "statx",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        flags_with(&["AT_STATX_SYNC_AS_STAT"], "AT_SYMLINK_NOFOLLOW", !follow),
+                        named_symbol("STATX_ALL"),
+                        Expression::Struct(HashMap::from([(
+                            "stx_mask".to_owned(),
+                            named_symbol("STATX_ALL"),
+                        )])),
+                    ],
+                ),
+            ] {
+                assert_eq!(
+                    summarize([Ok(syscall(name, args))], &[], program_state()).unwrap(),
+                    [
+                        path_actions.clone(),
+                        vec![ProgramAction::Syscalls([name.into()].into())]
+                    ]
+                    .concat()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn readlink_non_symlink_reads() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        // Failing with EINVAL on an entry that is not a symlink, which the parser keeps
+        let sc = make_failed_syscall(
+            "readlink",
+            vec![
+                buf_expr(b"/var/lib/file"),
+                named_symbol("NULL"),
+                int_literal(4096),
+            ],
+            "EINVAL",
+        );
+        assert_eq!(
+            summarize_syscall(sc),
+            vec![
+                ProgramAction::Read("/var/lib/file".into()),
+                ProgramAction::Syscalls(["readlink".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn access_check_modes() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dir = temp_dir.path().to_owned();
+        let file = dir.join("file");
+        File::create(&file).unwrap();
+        let dev_null = PathBuf::from("/dev/null");
+        for (path, mode, path_actions) in [
+            (
+                &file,
+                named_symbol("F_OK"),
+                vec![ProgramAction::Read(file.clone())],
+            ),
+            (
+                &file,
+                named_symbol("W_OK"),
+                vec![
+                    ProgramAction::Read(file.clone()),
+                    ProgramAction::Write(file.clone()),
+                ],
+            ),
+            (
+                &file,
+                named_symbol("X_OK"),
+                vec![
+                    ProgramAction::Read(file.clone()),
+                    ProgramAction::Exec(file.clone()),
+                ],
+            ),
+            // Execution of a directory checks its search permission only
+            (
+                &dir,
+                binary_or_flags(&["R_OK", "W_OK", "X_OK"]),
+                vec![
+                    ProgramAction::Read(dir.clone()),
+                    ProgramAction::Write(dir.clone()),
+                ],
+            ),
+            // A device stays writable on a read-only mount, and can not be executed
+            (
+                &dev_null,
+                binary_or_flags(&["R_OK", "W_OK", "X_OK"]),
+                vec![ProgramAction::Read(dev_null.clone())],
+            ),
+        ] {
+            let path = buf_expr(path.as_os_str().as_bytes());
+            for (name, args) in [
+                ("access", vec![path.clone(), mode.clone()]),
+                (
+                    "faccessat",
+                    vec![named_symbol("AT_FDCWD"), path.clone(), mode.clone()],
+                ),
+                (
+                    "faccessat2",
+                    vec![
+                        named_symbol("AT_FDCWD"),
+                        path.clone(),
+                        mode.clone(),
+                        int_literal(0),
+                    ],
+                ),
+            ] {
+                assert_eq!(
+                    summarize([Ok(syscall(name, args))], &[], program_state()).unwrap(),
+                    [
+                        path_actions.clone(),
+                        vec![ProgramAction::Syscalls([name.into()].into())]
+                    ]
+                    .concat()
+                );
+            }
+        }
+
+        // The link itself, not its target, when not followed
+        let link = dir.join("link");
+        unix::fs::symlink(&file, &link).unwrap();
+        assert_eq!(
+            summarize_syscall(make_syscall(
+                "faccessat2",
+                vec![
+                    named_symbol("AT_FDCWD"),
+                    buf_expr(link.as_os_str().as_bytes()),
+                    named_symbol("X_OK"),
+                    named_symbol("AT_SYMLINK_NOFOLLOW"),
+                ],
+                0,
+            )),
+            vec![
+                ProgramAction::Read(link),
+                ProgramAction::Syscalls(["faccessat2".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn fanotify_mark_flush_ignores_path() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        // An unreadable path is printed as its address
+        for path in [buf_expr(b"/etc"), int_literal(0x1234)] {
+            assert_eq!(
+                summarize_syscall(make_syscall(
+                    "fanotify_mark",
+                    vec![
+                        fd_expr(3, "anon_inode:[fanotify]"),
+                        named_symbol("FAN_MARK_FLUSH"),
+                        int_literal(0),
+                        named_symbol("AT_FDCWD"),
+                        path,
+                    ],
+                    0,
+                )),
+                vec![ProgramAction::Syscalls(["fanotify_mark".into()].into())]
             );
         }
     }

@@ -569,6 +569,34 @@ mod tests {
     }
 
     #[test]
+    fn existing_path_query_failures_kept_by_iterator() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        // Path queries failing after their lookup are kept, unlike other calls failing with the same errors
+        let lines = Cursor::new(
+            "1       0.000001 readlink(\"\\x2f\\x61\", 0x7ffd5e4b8c10, 4096) = -1 EINVAL (Invalid argument)\n\
+             1       0.000002 readlinkat(AT_FDCWD, \"\\x2f\\x61\", 0x7ffd5e4b8c10, 4096) = -1 EINVAL (Invalid argument)\n\
+             1       0.000003 name_to_handle_at(AT_FDCWD, \"\\x2f\\x61\", {handle_bytes=0 => 12}, 0x7ffd5e4b8c0c, AT_HANDLE_FID) = -1 EOVERFLOW (Value too large for defined data type)\n\
+             1       0.000004 openat(AT_FDCWD, \"\\x2f\\x61\", O_RDONLY|O_TMPFILE) = -1 EINVAL (Invalid argument)\n\
+             1       0.000005 openat(AT_FDCWD, \"\\x2f\\x61\", O_RDONLY) = -1 EOVERFLOW (Value too large for defined data type)\n"
+                .as_bytes()
+                .to_vec(),
+        );
+        let retained = ["readlink", "readlinkat", "name_to_handle_at"];
+        let handled = retained.into_iter().chain(["openat"]).collect();
+        let parser = LogParser::new(Box::new(lines), None, handled).unwrap();
+        let names: Vec<SyscallName> = parser
+            .into_iter()
+            .map(|r| match r.unwrap() {
+                SyscallItem::Complete(sc) => sc.name,
+                SyscallItem::NameOnly(_) => panic!(),
+            })
+            .collect();
+
+        assert_eq!(names, retained.map(SyscallName::from));
+    }
+
+    #[test]
     fn successful_unhandled_syscall_yielded_by_iterator() {
         let _ = simple_logger::SimpleLogger::new().init();
 
