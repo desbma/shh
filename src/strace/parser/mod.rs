@@ -505,16 +505,16 @@ mod tests {
     fn failure_on_existing_entry_kept_by_iterator() {
         let _ = simple_logger::SimpleLogger::new().init();
 
-        // Failures on an existing entry are kept, complete or resumed, unlike one on an absent entry
+        // Failures on an existing entry are kept, complete or resumed, unlike a creation in an absent directory
         let lines = Cursor::new(
             "1       0.000001 rmdir(\"\\x2f\\x74\\x6d\\x70\\x2f\\x64\\x69\\x72\") = -1 ENOTEMPTY (Directory not empty)\n\
-             1       0.000002 rmdir(\"\\x2f\\x74\\x6d\\x70\\x2f\\x61\\x62\\x73\\x65\\x6e\\x74\") = -1 ENOENT (No such file or directory)\n\
+             1       0.000002 mkdir(\"\\x2f\\x74\\x6d\\x70\\x2f\\x61\\x62\\x73\\x65\\x6e\\x74\", 0777) = -1 ENOENT (No such file or directory)\n\
              1       0.000003 bind(3, {sa_family=AF_UNIX, sun_path=\"\\x2f\\x74\\x6d\\x70\\x2f\\x73\\x6f\\x63\\x6b\"}, 110 <unfinished ...>\n\
              1       0.000004 <... bind resumed> ) = -1 EADDRINUSE (Address already in use)\n"
                 .as_bytes()
                 .to_vec(),
         );
-        let handled = HashSet::from(["bind", "rmdir"]);
+        let handled = HashSet::from(["bind", "mkdir", "rmdir"]);
         let parser = LogParser::new(Box::new(lines), None, handled).unwrap();
         let syscalls: Vec<Syscall> = parser
             .into_iter()
@@ -525,6 +525,46 @@ mod tests {
             .collect();
 
         assert_snapshot!(syscalls);
+    }
+
+    #[test]
+    fn absent_entry_removal_kept_by_iterator() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        // Removals and renames of an absent entry are kept, unlike other calls failing on one
+        let lines = Cursor::new(
+            "1       0.000001 unlink(\"\\x2f\\x61\") = -1 ENOENT (No such file or directory)\n\
+             1       0.000002 unlinkat(AT_FDCWD, \"\\x2f\\x61\", AT_REMOVEDIR) = -1 ENOENT (No such file or directory)\n\
+             1       0.000003 mkdir(\"\\x2f\\x61\\x2f\\x62\", 0777) = -1 ENOENT (No such file or directory)\n\
+             1       0.000004 rmdir(\"\\x2f\\x61\") = -1 ENOENT (No such file or directory)\n\
+             1       0.000005 rename(\"\\x2f\\x61\", \"\\x2f\\x62\") = -1 ENOENT (No such file or directory)\n\
+             1       0.000006 stat(\"\\x2f\\x61\", 0x7ffd5e4b8c10) = -1 ENOENT (No such file or directory)\n\
+             1       0.000007 renameat(AT_FDCWD, \"\\x2f\\x61\", AT_FDCWD, \"\\x2f\\x62\") = -1 ENOENT (No such file or directory)\n\
+             1       0.000008 renameat2(AT_FDCWD, \"\\x2f\\x61\", AT_FDCWD, \"\\x2f\\x62\", RENAME_NOREPLACE <unfinished ...>\n\
+             1       0.000009 <... renameat2 resumed> ) = -1 ENOENT (No such file or directory)\n\
+             1       0.000010 unlink(\"\\x2f\\x61\") = -1 EACCES (Permission denied)\n"
+                .as_bytes()
+                .to_vec(),
+        );
+        let retained = [
+            "unlink",
+            "unlinkat",
+            "rmdir",
+            "rename",
+            "renameat",
+            "renameat2",
+        ];
+        let handled = retained.into_iter().chain(["mkdir", "stat"]).collect();
+        let parser = LogParser::new(Box::new(lines), None, handled).unwrap();
+        let names: Vec<SyscallName> = parser
+            .into_iter()
+            .map(|r| match r.unwrap() {
+                SyscallItem::Complete(sc) => sc.name,
+                SyscallItem::NameOnly(_) => panic!(),
+            })
+            .collect();
+
+        assert_eq!(names, retained.map(SyscallName::from));
     }
 
     #[test]

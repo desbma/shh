@@ -924,6 +924,15 @@ impl SyscallHandler for RenameHandler {
         traverse_parent_symlinks(&mut path_dst, actions);
         let dir_dst = path_dst.parent().map(Path::to_path_buf);
         traverse_symlinks(&mut path_dst, actions);
+        // A rename of an absent entry still writes to both directories
+        if sc.errno() == Some("ENOENT") {
+            if let (Some(dir_src), Some(dir_dst)) = (dir_src, dir_dst) {
+                actions.push(ProgramAction::Write(dir_src.clone()));
+                actions.push(ProgramAction::Write(dir_dst.clone()));
+                actions.push(ProgramAction::RequireSameMount(dir_src, dir_dst));
+            }
+            return Ok(());
+        }
         actions.push(ProgramAction::Read(path_src.clone()));
         actions.push(ProgramAction::Write(path_src.clone()));
         // An exchanged destination, or one a rename fails on, like with RENAME_NOREPLACE, exists before the call
@@ -1218,7 +1227,7 @@ pub(crate) struct PathHandler {
 }
 
 impl PathHandler {
-    /// Push the action on the syscall path, and return that path
+    /// Push the actions the syscall takes on its path, and return that path
     fn handle_path(
         &self,
         sc: &Syscall,
@@ -1282,9 +1291,16 @@ impl PathHandler {
                 traverse_parent_symlinks(&mut path, actions);
             }
         }
-        // A call failing on an existing entry, like a creation with EEXIST, depends on it, and acts on it in a
-        // run where it is absent
         if matches!(self.follow, FollowSymlink::Never) && !sc.is_successful() {
+            // A removal of an absent entry still writes to its directory
+            if sc.errno() == Some("ENOENT") {
+                if let Some(dir) = path.parent() {
+                    actions.push(ProgramAction::Write(dir.to_owned()));
+                }
+                return Ok(Some(path));
+            }
+            // A call failing on an existing entry, like a creation with EEXIST, depends on it, and acts on it in a
+            // run where it is absent
             actions.push(ProgramAction::Read(path.clone()));
         }
         actions.push((self.action)(path.clone()));
@@ -1676,6 +1692,13 @@ x86_Thread_features_locked:
                 metadata: None,
             }),
         }
+    }
+
+    pub(crate) fn make_failed_syscall(name: &str, args: Vec<Expression>, errno: &str) -> Syscall {
+        let mut sc = make_syscall(name, args, -1);
+        sc.ret_val.as_mut().unwrap().metadata =
+            Some(format!("{errno} (Error message)").into_bytes());
+        sc
     }
 
     // Helper to create a buffer expression

@@ -903,7 +903,8 @@ mod tests {
 
     use super::{
         handlers::tests::{
-            binary_or_flags, buf_expr, fd_expr, int_literal, make_syscall, named_symbol,
+            binary_or_flags, buf_expr, fd_expr, int_literal, make_failed_syscall, make_syscall,
+            named_symbol,
         },
         *,
     };
@@ -1337,6 +1338,45 @@ mod tests {
             vec![
                 ProgramAction::Remove("/var/lib/test".into()),
                 ProgramAction::Syscalls(["unlink".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn unlink_absent_entry_writes_dir() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        // Failing with ENOENT, which the parser keeps for removals
+        let sc = make_failed_syscall("unlink", vec![buf_expr(b"/var/lib/absent")], "ENOENT");
+        assert_eq!(
+            summarize_syscall(sc),
+            vec![
+                ProgramAction::Write("/var/lib".into()),
+                ProgramAction::Syscalls(["unlink".into()].into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn rename_absent_entry_writes_dirs() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        // Failing with ENOENT, which the parser keeps for renames
+        let sc = make_failed_syscall(
+            "rename",
+            vec![
+                buf_expr(b"/var/lib/apt/absent"),
+                buf_expr(b"/var/lib/misc/new"),
+            ],
+            "ENOENT",
+        );
+        assert_eq!(
+            summarize_syscall(sc),
+            vec![
+                ProgramAction::Write("/var/lib/apt".into()),
+                ProgramAction::Write("/var/lib/misc".into()),
+                ProgramAction::RequireSameMount("/var/lib/apt".into(), "/var/lib/misc".into()),
+                ProgramAction::Syscalls(["rename".into()].into()),
             ]
         );
     }

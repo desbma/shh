@@ -29,9 +29,31 @@ pub(crate) struct Syscall {
 
 impl Syscall {
     pub(crate) fn should_retain(&self) -> bool {
+        /// Syscalls writing to the directory of an absent entry
+        const ABSENT_ENTRY_WRITERS: [&str; 6] = [
+            "rename",
+            "renameat",
+            "renameat2",
+            "rmdir",
+            "unlink",
+            "unlinkat",
+        ];
+
         self.ret_val
             .as_ref()
             .is_none_or(Self::should_retain_ret_val)
+            || (self.errno() == Some("ENOENT")
+                && ABSENT_ENTRY_WRITERS.contains(&self.name.as_str()))
+    }
+
+    /// Return the error name recorded for a failed call
+    pub(crate) fn errno(&self) -> Option<&str> {
+        let rv = self.ret_val.as_ref()?;
+        if rv.value() != Some(-1) {
+            return None;
+        }
+        let metadata = str::from_utf8(rv.metadata.as_deref()?).ok()?;
+        Some(metadata.split_once(' ').map_or(metadata, |(name, _)| name))
     }
 
     pub(crate) fn is_successful(&self) -> bool {

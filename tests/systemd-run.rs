@@ -894,6 +894,50 @@ else:
     }
 
     #[test]
+    fn systemd_run_remove_absent() {
+        // Remove an absent entry, or rename one across two directories, in /var/lib, which the service must see
+        // absent rather than on a read-only mount
+        // Python script expecting to fail on an absent entry
+        let script = "
+import os, sys
+
+kind, path, dst = sys.argv[1:]
+try:
+    if kind == 'unlink':
+        os.unlink(path)
+    elif kind == 'rmdir':
+        os.rmdir(path)
+    elif kind == 'rename':
+        os.rename(path, dst)
+    else:
+        raise ValueError(kind)
+except FileNotFoundError:
+    pass
+else:
+    sys.exit(1)
+";
+        let var_lib_dir = tempfile::tempdir_in("/var/lib").unwrap();
+        let src_dir = var_lib_dir.path().join("src");
+        let dst_dir = var_lib_dir.path().join("dst");
+        create_entry("dir", &src_dir);
+        create_entry("dir", &dst_dir);
+        let absent = var_lib_dir.path().join("absent");
+        let src = src_dir.join("absent");
+        let dst = dst_dir.join("new");
+        for (kind, path) in [("unlink", &absent), ("rmdir", &absent), ("rename", &src)] {
+            let cmd = [
+                "python3",
+                "-c",
+                script,
+                kind,
+                path.to_str().unwrap(),
+                dst.to_str().unwrap(),
+            ];
+            profile_and_run(&cmd, false);
+        }
+    }
+
+    #[test]
     fn systemd_run_bind_port_in_use() {
         // Bind a port held during profiling and the run, which the service must see in use
         let script = "

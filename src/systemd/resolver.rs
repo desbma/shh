@@ -56,7 +56,10 @@ impl OptionValueEffect {
                         !empty_paths.matches(path_action, true) || created(path_action)
                     }
                     ProgramAction::Write(path_action) => {
-                        !empty_paths.matches(path_action, false) || created(path_action)
+                        !empty_paths.matches(path_action, false)
+                            || created(path_action)
+                            // The writable base itself exists, empty
+                            || (!empty_paths.base_ro && *path_action == empty_paths.base)
                     }
                     ProgramAction::Remove(path_action) => {
                         (!empty_paths.matches(path_action, false)
@@ -671,6 +674,10 @@ mod tests {
         assert_eq!(resolve(&opts, &[], &hardening_opts), expected);
         let actions = [ProgramAction::Create("/tmp/data".into())];
         assert_eq!(resolve(&opts, &actions, &hardening_opts), expected);
+        for path in ["/tmp", "/var/tmp"] {
+            let actions = [ProgramAction::Write(path.into())];
+            assert_eq!(resolve(&opts, &actions, &hardening_opts), expected);
+        }
 
         for action in [
             ProgramAction::Read("/tmp/data".into()),
@@ -682,6 +689,15 @@ mod tests {
             let actions = [ProgramAction::Create("/tmp/data".into()), action];
             assert_eq!(resolve(&opts, &actions, &hardening_opts), expected);
         }
+    }
+
+    #[test]
+    fn resolve_private_devices_base_write() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let (opts, hardening_opts) = test_options_standard(&["PrivateDevices"]);
+        let actions = [ProgramAction::Write("/dev".into())];
+        assert!(resolve(&opts, &actions, &hardening_opts).is_empty());
     }
 
     #[test]
