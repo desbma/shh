@@ -959,11 +959,44 @@ except OSError as e:
 else:
     sys.exit(1)
 ";
-        let var_lib_dir = tempfile::tempdir_in("/var/lib").unwrap();
-        let path = var_lib_dir.path().join("file");
-        create_entry("file", &path);
+        let file = tempfile::NamedTempFile::new_in("/var/lib").unwrap();
         for kind in ["removexattr", "setxattr"] {
-            let cmd = ["python3", "-c", script, kind, path.to_str().unwrap()];
+            let cmd = ["python3", "-c", script, kind, file.path().to_str().unwrap()];
+            profile_and_run(&cmd, false);
+        }
+    }
+
+    #[test]
+    fn systemd_run_xattrat() {
+        // Set an attribute, and remove an absent one, of a file in /var/lib, with the syscalls taking a directory
+        // descriptor
+        let release = fs::read_to_string("/proc/sys/kernel/osrelease").unwrap();
+        let mut version = release.split('.').map(|n| n.parse::<u32>().unwrap());
+        if (version.next().unwrap(), version.next().unwrap()) < (6, 13) {
+            eprintln!("Kernel without setxattrat and removexattrat, skipping");
+            return;
+        }
+        let script = "
+import ctypes, errno, os, struct, sys
+
+kind, path = sys.argv[1:]
+libc = ctypes.CDLL(None, use_errno=True)
+if kind == 'setxattrat':
+    value = ctypes.create_string_buffer(b'value')
+    # struct xattr_args: value pointer, size, flags
+    args = struct.pack('QII', ctypes.addressof(value), 5, 0)
+    ret = libc.syscall(463, -100, path.encode(), 0, b'user.test', args, ctypes.c_size_t(len(args)))
+elif kind == 'removexattrat':
+    ret = libc.syscall(466, -100, path.encode(), 0, b'user.absent')
+else:
+    raise ValueError(kind)
+if ret < 0 and not (kind == 'removexattrat' and ctypes.get_errno() == errno.ENODATA):
+    err = ctypes.get_errno()
+    raise OSError(err, os.strerror(err), path)
+";
+        let file = tempfile::NamedTempFile::new_in("/var/lib").unwrap();
+        for kind in ["setxattrat", "removexattrat"] {
+            let cmd = ["python3", "-c", script, kind, file.path().to_str().unwrap()];
             profile_and_run(&cmd, false);
         }
     }

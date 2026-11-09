@@ -559,6 +559,15 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
             }),
         );
         m.insert(
+            "removexattrat",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::UnlessNoFollowFlag(2),
+                action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
             "rename",
             Box::new(RenameHandler {
                 relfd_src: None,
@@ -617,6 +626,15 @@ static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
                 relfd: None,
                 path: 0,
                 follow: FollowSymlink::Always,
+                action: ProgramAction::Write,
+            }),
+        );
+        m.insert(
+            "setxattrat",
+            Box::new(PathHandler {
+                relfd: Some(0),
+                path: 1,
+                follow: FollowSymlink::UnlessNoFollowFlag(2),
                 action: ProgramAction::Write,
             }),
         );
@@ -1513,34 +1531,82 @@ mod tests {
         File::create(&target).unwrap();
         unix::fs::symlink(&target, &link).unwrap();
         let dir_fd = fd_expr(3, temp_dir.path());
-        for (name, args) in [
+        for (flags, path_actions) in [
             (
-                "fchmodat2",
-                vec![
-                    dir_fd.clone(),
-                    buf_expr(b"link"),
-                    int_literal(0o644),
-                    named_symbol("AT_SYMLINK_NOFOLLOW"),
-                ],
+                named_symbol("AT_SYMLINK_NOFOLLOW"),
+                vec![ProgramAction::Write(link.clone())],
             ),
             (
-                "fchownat",
+                int_literal(0),
                 vec![
-                    dir_fd.clone(),
-                    buf_expr(b"link"),
-                    int_literal(0),
-                    int_literal(0),
-                    named_symbol("AT_SYMLINK_NOFOLLOW"),
+                    ProgramAction::Read(link.clone()),
+                    ProgramAction::Write(target.clone()),
                 ],
             ),
         ] {
-            assert_eq!(
-                summarize([Ok(syscall(name, args))], &[], program_state()).unwrap(),
-                vec![
-                    ProgramAction::Write(link.clone()),
-                    ProgramAction::Syscalls([name.into()].into()),
-                ]
-            );
+            for (name, args) in [
+                (
+                    "fchmodat2",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        int_literal(0o644),
+                        flags.clone(),
+                    ],
+                ),
+                (
+                    "fchownat",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        int_literal(0),
+                        int_literal(0),
+                        flags.clone(),
+                    ],
+                ),
+                (
+                    "removexattrat",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        flags.clone(),
+                        buf_expr(b"user.test"),
+                    ],
+                ),
+                (
+                    "setxattrat",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        flags.clone(),
+                        buf_expr(b"user.test"),
+                        Expression::Struct(HashMap::from([
+                            ("value".to_owned(), buf_expr(b"value")),
+                            ("size".to_owned(), int_literal(5)),
+                            ("flags".to_owned(), int_literal(0)),
+                        ])),
+                        int_literal(16),
+                    ],
+                ),
+                (
+                    "utimensat",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        named_symbol("NULL"),
+                        flags.clone(),
+                    ],
+                ),
+            ] {
+                assert_eq!(
+                    summarize([Ok(syscall(name, args))], &[], program_state()).unwrap(),
+                    [
+                        path_actions.clone(),
+                        vec![ProgramAction::Syscalls([name.into()].into())]
+                    ]
+                    .concat()
+                );
+            }
         }
     }
 
