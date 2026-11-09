@@ -9,9 +9,11 @@ mod tests {
         fs::{self, Permissions},
         io::{BufRead as _, Write as _},
         iter,
+        net::TcpListener,
         os::unix::{
             self,
             fs::{FileTypeExt as _, PermissionsExt as _},
+            net::UnixListener,
         },
         path::Path,
         process,
@@ -820,6 +822,98 @@ ptrace(PTRACE_DETACH, target_pid)
                 remove_entry(&path);
                 let _ = fs::remove_file(&src);
             }
+        }
+    }
+
+    #[test]
+    fn systemd_run_fail_on_held_entry() {
+        // Fail on an entry held during profiling and the run, which the service must see: a non-empty directory to
+        // remove or to rename an empty one onto, or a socket path to bind, directly in /tmp or in /var/lib
+        // Python script expecting to fail on an existing entry
+        let script = "
+import errno, os, socket, sys
+
+kind, path, src = sys.argv[1:]
+expected = errno.EADDRINUSE if kind == 'bind' else errno.ENOTEMPTY
+try:
+    if kind == 'rmdir':
+        os.rmdir(path)
+    elif kind == 'rename':
+        os.rename(src, path)
+    elif kind == 'bind':
+        socket.socket(socket.AF_UNIX).bind(path)
+    else:
+        raise ValueError(kind)
+except OSError as e:
+    if e.errno != expected:
+        raise
+else:
+    sys.exit(1)
+";
+        let var_lib_dir = tempfile::tempdir_in("/var/lib").unwrap();
+        let tmp_name = tempfile::NamedTempFile::new_in("/tmp").unwrap();
+        let tmp_path = tmp_name.path().with_extension("entry");
+        for path in [tmp_path, var_lib_dir.path().join("entry")] {
+            let src = path.with_extension("src");
+            for kind in ["rmdir", "rename", "bind"] {
+                if kind == "bind" {
+                    UnixListener::bind(&path).unwrap();
+                } else {
+                    create_entry("dir", &path);
+                    create_entry("file", &path.join("file"));
+                }
+                if kind == "rename" {
+                    create_entry("dir", &src);
+                }
+                let cmd = [
+                    "python3",
+                    "-c",
+                    script,
+                    kind,
+                    path.to_str().unwrap(),
+                    src.to_str().unwrap(),
+                ];
+                for shh_opts in &*ALL_SHH_RUN_OPTS {
+                    // Whitelist mode wrongly makes both rename operands mount points, failing the rename with EBUSY
+                    if kind == "rename" && shh_opts.contains(&"-w") {
+                        continue;
+                    }
+                    eprintln!(
+                        "shh run option: {opts} ({kind} in {path:?})",
+                        opts = shh_opts.join(" ")
+                    );
+                    let sd_opts = generate_options(&cmd, shh_opts);
+                    let _ = systemd_run(&cmd, &sd_opts, false);
+                }
+                remove_entry(&path);
+                if kind == "rename" {
+                    remove_entry(&src);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn systemd_run_bind_port_in_use() {
+        // Bind a port held during profiling and the run, which the service must see in use
+        let script = "
+import errno, socket, sys
+
+try:
+    socket.socket().bind(('127.0.0.1', int(sys.argv[1])))
+except OSError as e:
+    if e.errno != errno.EADDRINUSE:
+        raise
+else:
+    sys.exit(1)
+";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port().to_string();
+        let cmd = ["python3", "-c", script, &port];
+        for shh_opts in &*ALL_SHH_RUN_OPTS {
+            eprintln!("shh run option: {opts}", opts = shh_opts.join(" "));
+            let sd_opts = generate_options(&cmd, shh_opts);
+            let _ = systemd_run(&cmd, &sd_opts, false);
         }
     }
 

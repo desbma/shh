@@ -144,7 +144,7 @@ impl Iterator for LogParser {
                     log::trace!("Parsed line: {line:?}");
                     match parsed {
                         ParsedSyscall::Syscall(sc) => {
-                            if sc.is_successful_or_pending() {
+                            if sc.should_retain() {
                                 break SyscallItem::Complete(Box::new(sc));
                             }
                         }
@@ -160,7 +160,7 @@ impl Iterator for LogParser {
                                 let sc_start =
                                     self.unfinished_syscalls.swap_remove(unfinished_index); // I fucking love Rust <3
                                 let sc = sc_start.end(&sc_end);
-                                if sc.is_successful_or_pending() {
+                                if sc.should_retain() {
                                     break SyscallItem::Complete(Box::new(sc));
                                 }
                             } else {
@@ -168,10 +168,7 @@ impl Iterator for LogParser {
                             }
                         }
                         ParsedSyscall::NameOnly { name, ret_val } => {
-                            if ret_val
-                                .as_ref()
-                                .is_none_or(Syscall::is_successful_or_pending_ret_val)
-                            {
+                            if ret_val.as_ref().is_none_or(Syscall::should_retain_ret_val) {
                                 break SyscallItem::NameOnly(name);
                             }
                         }
@@ -502,6 +499,32 @@ mod tests {
         let parser = LogParser::new(Box::new(lines), None, handled).unwrap();
         let items: Vec<SyscallItem> = parser.into_iter().collect::<Result<_, _>>().unwrap();
         assert!(items.is_empty());
+    }
+
+    #[test]
+    fn failure_on_existing_entry_kept_by_iterator() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        // Failures on an existing entry are kept, complete or resumed, unlike one on an absent entry
+        let lines = Cursor::new(
+            "1       0.000001 rmdir(\"\\x2f\\x74\\x6d\\x70\\x2f\\x64\\x69\\x72\") = -1 ENOTEMPTY (Directory not empty)\n\
+             1       0.000002 rmdir(\"\\x2f\\x74\\x6d\\x70\\x2f\\x61\\x62\\x73\\x65\\x6e\\x74\") = -1 ENOENT (No such file or directory)\n\
+             1       0.000003 bind(3, {sa_family=AF_UNIX, sun_path=\"\\x2f\\x74\\x6d\\x70\\x2f\\x73\\x6f\\x63\\x6b\"}, 110 <unfinished ...>\n\
+             1       0.000004 <... bind resumed> ) = -1 EADDRINUSE (Address already in use)\n"
+                .as_bytes()
+                .to_vec(),
+        );
+        let handled = HashSet::from(["bind", "rmdir"]);
+        let parser = LogParser::new(Box::new(lines), None, handled).unwrap();
+        let syscalls: Vec<Syscall> = parser
+            .into_iter()
+            .map(|r| match r.unwrap() {
+                SyscallItem::Complete(sc) => *sc,
+                SyscallItem::NameOnly(_) => panic!(),
+            })
+            .collect();
+
+        assert_snapshot!(syscalls);
     }
 
     #[test]

@@ -28,10 +28,10 @@ pub(crate) struct Syscall {
 }
 
 impl Syscall {
-    pub(crate) fn is_successful_or_pending(&self) -> bool {
+    pub(crate) fn should_retain(&self) -> bool {
         self.ret_val
             .as_ref()
-            .is_none_or(Self::is_successful_or_pending_ret_val)
+            .is_none_or(Self::should_retain_ret_val)
     }
 
     pub(crate) fn is_successful(&self) -> bool {
@@ -41,26 +41,26 @@ impl Syscall {
             .is_some_and(|v| v >= 0)
     }
 
-    pub(crate) fn is_successful_or_pending_ret_val(rv: &IntegerExpression) -> bool {
+    pub(crate) fn should_retain_ret_val(rv: &IntegerExpression) -> bool {
         // Strace `--successful-only` argument can make us miss interesting stuff,
-        // so identify "successful" syscalls with our own logic
+        // so identify syscalls to retain with our own logic
 
-        /// Errors codes considered as "successful"
-        /// They are 2 cases in which we allow this:
-        /// - The code means "pending", and the operation can be waited for with another syscall,
-        ///   for example `connect` can return `EINPROGRESS` "error", and successful connect completion
-        ///   can then be waited for with `epoll`
-        /// - The operation is idempotent, and the code means "already done", for example `open`
-        ///   with `O_EXCL|O_CREAT` flags that returns EEXIST error
-        const SUCCESSFUL_ERRNO_VALUES: [&str; 4] =
-            ["EAGAIN", "EEXIST", "EINPROGRESS", "EWOULDBLOCK"];
+        /// Error codes of pending calls, and of calls failing on an existing entry or address
+        const RETAINED_ERRNOS: [&str; 6] = [
+            "EADDRINUSE",
+            "EAGAIN",
+            "EEXIST",
+            "EINPROGRESS",
+            "ENOTEMPTY",
+            "EWOULDBLOCK",
+        ];
 
         rv.value().is_some_and(|v| v != -1)
             || rv
                 .metadata
                 .as_ref()
                 .and_then(|m| str::from_utf8(m).ok())
-                .is_some_and(|m| SUCCESSFUL_ERRNO_VALUES.iter().any(|e| m.starts_with(e)))
+                .is_some_and(|m| RETAINED_ERRNOS.iter().any(|e| m.starts_with(e)))
     }
 }
 
@@ -375,7 +375,7 @@ mod benchs {
                     let v = test::black_box(*val);
                     let v2 = test::black_box(v);
 
-                    // Comparison with -1 (is_successful_or_pending)
+                    // Comparison with -1 (should_retain)
                     let _ = test::black_box(v != -1);
                     // Comparison with 0 (BooleanAnd logic)
                     let _ = test::black_box(v != 0);
@@ -403,7 +403,7 @@ mod benchs {
                     let v = test::black_box(*val);
                     let v2 = test::black_box(v);
 
-                    // Comparison with -1 (is_successful_or_pending)
+                    // Comparison with -1 (should_retain)
                     let _ = test::black_box(v != -1);
                     // Comparison with 0 (BooleanAnd logic)
                     let _ = test::black_box(v != 0);
