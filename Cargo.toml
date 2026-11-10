@@ -38,7 +38,7 @@ log = { version = "0.4.35", default-features = false, features = ["max_level_tra
 nix = { version = "0.31.3", default-features = false, features = ["fs", "user", "process", "signal"] }
 nom = { version = "8.0.0", default-features = false, features = ["std"] }
 path-clean = { version = "1.0.1", default-features = false }
-phf = { version = "0.14.0", default-features = false, features = ["std", "macros"] }
+phf = { version = "0.14.0", default-features = false, features = ["std", "macros", "ptrhash"] }
 rand = { version = "0.10.3", default-features = false, features = ["std", "thread_rng"] }
 regex = { version = "1.13.1", default-features = false, features = ["std", "perf"] }
 serde = { version = "1.0.229", default-features = false, features = ["std", "derive"] }

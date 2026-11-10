@@ -7,7 +7,6 @@ use std::{
     num::NonZeroU16,
     os::fd::RawFd,
     path::PathBuf,
-    sync::LazyLock,
 };
 
 use anyhow::Context as _;
@@ -276,657 +275,459 @@ enum FdOrPath<T> {
 // - https://filippo.io/linux-syscall-table/
 // - https://linasm.sourceforge.net/docs/syscalls/filesystem.php
 //
-static SYSCALL_MAP: LazyLock<HashMap<&'static str, Box<dyn SyscallHandler>>> =
-    LazyLock::new(|| {
-        let mut m: HashMap<&'static str, Box<dyn SyscallHandler>> = HashMap::new();
-        m.insert("accept", Box::new(NetworkHandler { fd: 0, sockaddr: 1 }));
-        m.insert("accept4", Box::new(NetworkHandler { fd: 0, sockaddr: 1 }));
-        m.insert(
-            "access",
-            Box::new(AccessHandler {
-                path: PathHandler {
-                    relfd: None,
-                    path: 0,
-                    follow: FollowSymlink::Always,
-                    action: ProgramAction::Read,
-                },
-                mode: 1,
-            }),
-        );
-        m.insert("bind", Box::new(NetworkHandler { fd: 0, sockaddr: 1 }));
-        m.insert(
-            "chdir",
-            Box::new(ChdirHandler {
-                path: FdOrPath::Path(0),
-            }),
-        );
-        m.insert(
-            "chmod",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "chown",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Write,
-            }),
-        );
-        // Note: strace decodes clone's arguments as a struct, like clone3
-        m.insert("clone", Box::new(Clone3Handler { args: 0 }));
-        m.insert("clone3", Box::new(Clone3Handler { args: 0 }));
-        m.insert("connect", Box::new(NetworkHandler { fd: 0, sockaddr: 1 }));
-        m.insert(
-            "creat",
-            Box::new(OpenHandler {
-                relfd: None,
-                path: 0,
-                flags: None,
-            }),
-        );
-        m.insert("epoll_ctl", Box::new(EpollCtlHandler { op: 1, event: 3 }));
-        m.insert(
-            "execve",
-            Box::new(ExecHandler {
-                relfd: None,
-                path: 0,
-            }),
-        );
-        m.insert(
-            "execveat",
-            Box::new(ExecHandler {
-                relfd: Some(0),
-                path: 1,
-            }),
-        );
-        m.insert(
-            "faccessat",
-            Box::new(AccessHandler {
-                path: PathHandler {
-                    relfd: Some(0),
-                    path: 1,
-                    follow: FollowSymlink::Always,
-                    action: ProgramAction::Read,
-                },
-                mode: 2,
-            }),
-        );
-        m.insert(
-            "faccessat2",
-            Box::new(AccessHandler {
-                path: PathHandler {
-                    relfd: Some(0),
-                    path: 1,
-                    follow: FollowSymlink::UnlessNoFollowFlag {
-                        flags: 3,
-                        no_follow_flag: "AT_SYMLINK_NOFOLLOW",
-                    },
-                    action: ProgramAction::Read,
-                },
-                mode: 2,
-            }),
-        );
-        m.insert(
-            "fanotify_mark",
-            Box::new(FanotifyMarkHandler {
-                path: PathHandler {
-                    relfd: Some(3),
-                    path: 4,
-                    follow: FollowSymlink::UnlessNoFollowFlag {
-                        flags: 1,
-                        no_follow_flag: "FAN_MARK_DONT_FOLLOW",
-                    },
-                    action: ProgramAction::Read,
-                },
+static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::phf_map! {
+    "accept" => &NetworkHandler { fd: 0, sockaddr: 1 },
+    "accept4" => &NetworkHandler { fd: 0, sockaddr: 1 },
+    "access" => &AccessHandler {
+        path: PathHandler {
+            relfd: None,
+            path: 0,
+            follow: FollowSymlink::Always,
+            action: ProgramAction::Read,
+        },
+        mode: 1,
+    },
+    "bind" => &NetworkHandler { fd: 0, sockaddr: 1 },
+    "chdir" => &ChdirHandler {
+        path: FdOrPath::Path(0),
+    },
+    "chmod" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Write,
+    },
+    "chown" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Write,
+    },
+    // Note: strace decodes clone's arguments as a struct, like clone3
+    "clone" => &Clone3Handler { args: 0 },
+    "clone3" => &Clone3Handler { args: 0 },
+    "connect" => &NetworkHandler { fd: 0, sockaddr: 1 },
+    "creat" => &OpenHandler {
+        relfd: None,
+        path: 0,
+        flags: None,
+    },
+    "epoll_ctl" => &EpollCtlHandler { op: 1, event: 3 },
+    "execve" => &ExecHandler {
+        relfd: None,
+        path: 0,
+    },
+    "execveat" => &ExecHandler {
+        relfd: Some(0),
+        path: 1,
+    },
+    "faccessat" => &AccessHandler {
+        path: PathHandler {
+            relfd: Some(0),
+            path: 1,
+            follow: FollowSymlink::Always,
+            action: ProgramAction::Read,
+        },
+        mode: 2,
+    },
+    "faccessat2" => &AccessHandler {
+        path: PathHandler {
+            relfd: Some(0),
+            path: 1,
+            follow: FollowSymlink::UnlessNoFollowFlag {
+                flags: 3,
+                no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+            },
+            action: ProgramAction::Read,
+        },
+        mode: 2,
+    },
+    "fanotify_mark" => &FanotifyMarkHandler {
+        path: PathHandler {
+            relfd: Some(3),
+            path: 4,
+            follow: FollowSymlink::UnlessNoFollowFlag {
                 flags: 1,
-            }),
-        );
-        m.insert(
-            "fchdir",
-            Box::new(ChdirHandler {
-                path: FdOrPath::Fd(0),
-            }),
-        );
-        m.insert(
-            "fchmodat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "fchmodat2",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag {
-                    flags: 3,
-                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
-                },
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "fchownat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag {
-                    flags: 4,
-                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
-                },
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "file_getattr",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag {
-                    flags: 4,
-                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
-                },
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert("fork", Box::new(ForkHandler));
-        m.insert("fstat", Box::new(StatFdHandler { fd: 0 }));
-        m.insert(
-            "futimesat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert("getdents", Box::new(StatFdHandler { fd: 0 }));
-        m.insert(
-            "getxattr",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "getxattrat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag {
-                    flags: 2,
-                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
-                },
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "inotify_add_watch",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag {
-                    flags: 2,
-                    no_follow_flag: "IN_DONT_FOLLOW",
-                },
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert("kill", Box::new(KillHandler { pid: 0, sig: 1 }));
-        m.insert(
-            "lchown",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::OnTrailingSlash,
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "lgetxattr",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::OnTrailingSlash,
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "link",
-            Box::new(LinkHandler {
-                old: PathHandler {
-                    relfd: None,
-                    path: 0,
-                    follow: FollowSymlink::OnTrailingSlash,
-                    action: ProgramAction::Read,
-                },
-                new: PathHandler {
-                    relfd: None,
-                    path: 1,
-                    follow: FollowSymlink::Never,
-                    action: ProgramAction::Create,
-                },
-            }),
-        );
-        m.insert(
-            "linkat",
-            Box::new(LinkHandler {
-                old: PathHandler {
-                    relfd: Some(0),
-                    path: 1,
-                    follow: FollowSymlink::IfFollowFlag(4),
-                    action: ProgramAction::Read,
-                },
-                new: PathHandler {
-                    relfd: Some(2),
-                    path: 3,
-                    follow: FollowSymlink::Never,
-                    action: ProgramAction::Create,
-                },
-            }),
-        );
-        m.insert(
-            "listxattr",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "listxattrat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag {
-                    flags: 2,
-                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
-                },
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "llistxattr",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::OnTrailingSlash,
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "lremovexattr",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::OnTrailingSlash,
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "lsetxattr",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::OnTrailingSlash,
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "lstat",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert("memfd_create", Box::new(MemfdCreateHandler { flags: 1 }));
-        m.insert(
-            "mkdir",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Never,
-                action: ProgramAction::Create,
-            }),
-        );
-        m.insert(
-            "mkdirat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::Never,
-                action: ProgramAction::Create,
-            }),
-        );
-        m.insert(
-            "mknod",
-            Box::new(MknodHandler {
-                path: FdOrPath::Path(0),
-                mode: 1,
-            }),
-        );
-        m.insert(
-            "mknodat",
-            Box::new(MknodHandler {
-                path: FdOrPath::Fd(1),
-                mode: 2,
-            }),
-        );
-        m.insert(
-            "mmap",
-            Box::new(MmapHandler {
-                prot: 2,
-                flags: Some(3),
-                fd: Some(4),
-            }),
-        );
-        m.insert(
-            "mmap2",
-            Box::new(MmapHandler {
-                prot: 2,
-                flags: Some(3),
-                fd: Some(4),
-            }),
-        );
-        m.insert("mount", Box::new(MountHandler { flags: 3 }));
-        m.insert(
-            "mprotect",
-            Box::new(MmapHandler {
-                prot: 2,
-                flags: None,
-                fd: None,
-            }),
-        );
-        m.insert(
-            "name_to_handle_at",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::IfFollowFlag(4),
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "newfstatat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "open",
-            Box::new(OpenHandler {
-                relfd: None,
-                path: 0,
-                flags: Some(1),
-            }),
-        );
-        m.insert(
-            "openat",
-            Box::new(OpenHandler {
-                relfd: Some(0),
-                path: 1,
-                flags: Some(2),
-            }),
-        );
-        m.insert(
-            "openat2",
-            Box::new(OpenHandler {
-                relfd: Some(0),
-                path: 1,
-                flags: Some(2),
-            }),
-        );
-        m.insert(
-            "pkey_mprotect",
-            Box::new(MmapHandler {
-                prot: 2,
-                flags: None,
-                fd: None,
-            }),
-        );
-        m.insert(
-            "readlink",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::OnTrailingSlash,
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "readlinkat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::OnTrailingSlash,
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert("recvfrom", Box::new(NetworkHandler { fd: 0, sockaddr: 4 }));
-        m.insert(
-            "removexattr",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "removexattrat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag {
-                    flags: 2,
-                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
-                },
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "rename",
-            Box::new(RenameHandler {
-                relfd_src: None,
-                path_src: 0,
-                relfd_dst: None,
-                path_dst: 1,
-                flags: None,
-            }),
-        );
-        m.insert(
-            "renameat",
-            Box::new(RenameHandler {
-                relfd_src: Some(0),
-                path_src: 1,
-                relfd_dst: Some(2),
-                path_dst: 3,
-                flags: None,
-            }),
-        );
-        m.insert(
-            "renameat2",
-            Box::new(RenameHandler {
-                relfd_src: Some(0),
-                path_src: 1,
-                relfd_dst: Some(2),
-                path_dst: 3,
-                flags: Some(4),
-            }),
-        );
-        m.insert(
-            "rmdir",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Never,
-                action: ProgramAction::Remove,
-            }),
-        );
-        m.insert(
-            "sched_setscheduler",
-            Box::new(SetSchedulerHandler { policy: 1 }),
-        );
-        m.insert("sendto", Box::new(NetworkHandler { fd: 0, sockaddr: 4 }));
-        m.insert(
-            "setsockopt",
-            Box::new(SetsockoptHandler {
-                fd: 0,
-                level: 1,
-                optname: 2,
-                optval: 3,
-            }),
-        );
-        m.insert(
-            "setxattr",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "setxattrat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag {
-                    flags: 2,
-                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
-                },
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert("shmctl", Box::new(ShmCtlHandler { op: 1 }));
-        m.insert("socket", Box::new(SocketHandler { af: 0, flags: 1 }));
-        m.insert(
-            "stat",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "statfs",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "statx",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag {
-                    flags: 2,
-                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
-                },
-                action: ProgramAction::Read,
-            }),
-        );
-        m.insert(
-            "symlink",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 1,
-                follow: FollowSymlink::Never,
-                action: ProgramAction::Create,
-            }),
-        );
-        m.insert(
-            "symlinkat",
-            Box::new(PathHandler {
-                relfd: Some(1),
-                path: 2,
-                follow: FollowSymlink::Never,
-                action: ProgramAction::Create,
-            }),
-        );
-        m.insert("timer_create", Box::new(TimerCreateHandler { clockid: 0 }));
-        m.insert(
-            "truncate",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "unlink",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Never,
-                action: ProgramAction::Remove,
-            }),
-        );
-        m.insert(
-            "unlinkat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::Never,
-                action: ProgramAction::Remove,
-            }),
-        );
-        m.insert("unshare", Box::new(UnshareHandler { flags: 0 }));
-        m.insert(
-            "utime",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "utimensat",
-            Box::new(PathHandler {
-                relfd: Some(0),
-                path: 1,
-                follow: FollowSymlink::UnlessNoFollowFlag {
-                    flags: 3,
-                    no_follow_flag: "AT_SYMLINK_NOFOLLOW",
-                },
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert(
-            "utimes",
-            Box::new(PathHandler {
-                relfd: None,
-                path: 0,
-                follow: FollowSymlink::Always,
-                action: ProgramAction::Write,
-            }),
-        );
-        m.insert("vfork", Box::new(ForkHandler));
-        m
-    });
+                no_follow_flag: "FAN_MARK_DONT_FOLLOW",
+            },
+            action: ProgramAction::Read,
+        },
+        flags: 1,
+    },
+    "fchdir" => &ChdirHandler {
+        path: FdOrPath::Fd(0),
+    },
+    "fchmodat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Write,
+    },
+    "fchmodat2" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::UnlessNoFollowFlag {
+            flags: 3,
+            no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+        },
+        action: ProgramAction::Write,
+    },
+    "fchownat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::UnlessNoFollowFlag {
+            flags: 4,
+            no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+        },
+        action: ProgramAction::Write,
+    },
+    "file_getattr" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::UnlessNoFollowFlag {
+            flags: 4,
+            no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+        },
+        action: ProgramAction::Read,
+    },
+    "fork" => &ForkHandler,
+    "fstat" => &StatFdHandler { fd: 0 },
+    "futimesat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Write,
+    },
+    "getdents" => &StatFdHandler { fd: 0 },
+    "getxattr" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Read,
+    },
+    "getxattrat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::UnlessNoFollowFlag {
+            flags: 2,
+            no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+        },
+        action: ProgramAction::Read,
+    },
+    "inotify_add_watch" => &PathHandler {
+        relfd: None,
+        path: 1,
+        follow: FollowSymlink::UnlessNoFollowFlag {
+            flags: 2,
+            no_follow_flag: "IN_DONT_FOLLOW",
+        },
+        action: ProgramAction::Read,
+    },
+    "kill" => &KillHandler { pid: 0, sig: 1 },
+    "lchown" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::OnTrailingSlash,
+        action: ProgramAction::Write,
+    },
+    "lgetxattr" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::OnTrailingSlash,
+        action: ProgramAction::Read,
+    },
+    "link" => &LinkHandler {
+        old: PathHandler {
+            relfd: None,
+            path: 0,
+            follow: FollowSymlink::OnTrailingSlash,
+            action: ProgramAction::Read,
+        },
+        new: PathHandler {
+            relfd: None,
+            path: 1,
+            follow: FollowSymlink::Never,
+            action: ProgramAction::Create,
+        },
+    },
+    "linkat" => &LinkHandler {
+        old: PathHandler {
+            relfd: Some(0),
+            path: 1,
+            follow: FollowSymlink::IfFollowFlag(4),
+            action: ProgramAction::Read,
+        },
+        new: PathHandler {
+            relfd: Some(2),
+            path: 3,
+            follow: FollowSymlink::Never,
+            action: ProgramAction::Create,
+        },
+    },
+    "listxattr" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Read,
+    },
+    "listxattrat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::UnlessNoFollowFlag {
+            flags: 2,
+            no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+        },
+        action: ProgramAction::Read,
+    },
+    "llistxattr" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::OnTrailingSlash,
+        action: ProgramAction::Read,
+    },
+    "lremovexattr" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::OnTrailingSlash,
+        action: ProgramAction::Write,
+    },
+    "lsetxattr" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::OnTrailingSlash,
+        action: ProgramAction::Write,
+    },
+    "lstat" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Read,
+    },
+    "memfd_create" => &MemfdCreateHandler { flags: 1 },
+    "mkdir" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Never,
+        action: ProgramAction::Create,
+    },
+    "mkdirat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::Never,
+        action: ProgramAction::Create,
+    },
+    "mknod" => &MknodHandler {
+        path: FdOrPath::Path(0),
+        mode: 1,
+    },
+    "mknodat" => &MknodHandler {
+        path: FdOrPath::Fd(1),
+        mode: 2,
+    },
+    "mmap" => &MmapHandler {
+        prot: 2,
+        flags: Some(3),
+        fd: Some(4),
+    },
+    "mmap2" => &MmapHandler {
+        prot: 2,
+        flags: Some(3),
+        fd: Some(4),
+    },
+    "mount" => &MountHandler { flags: 3 },
+    "mprotect" => &MmapHandler {
+        prot: 2,
+        flags: None,
+        fd: None,
+    },
+    "name_to_handle_at" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::IfFollowFlag(4),
+        action: ProgramAction::Read,
+    },
+    "newfstatat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Read,
+    },
+    "open" => &OpenHandler {
+        relfd: None,
+        path: 0,
+        flags: Some(1),
+    },
+    "openat" => &OpenHandler {
+        relfd: Some(0),
+        path: 1,
+        flags: Some(2),
+    },
+    "openat2" => &OpenHandler {
+        relfd: Some(0),
+        path: 1,
+        flags: Some(2),
+    },
+    "pkey_mprotect" => &MmapHandler {
+        prot: 2,
+        flags: None,
+        fd: None,
+    },
+    "readlink" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::OnTrailingSlash,
+        action: ProgramAction::Read,
+    },
+    "readlinkat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::OnTrailingSlash,
+        action: ProgramAction::Read,
+    },
+    "recvfrom" => &NetworkHandler { fd: 0, sockaddr: 4 },
+    "removexattr" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Write,
+    },
+    "removexattrat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::UnlessNoFollowFlag {
+            flags: 2,
+            no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+        },
+        action: ProgramAction::Write,
+    },
+    "rename" => &RenameHandler {
+        relfd_src: None,
+        path_src: 0,
+        relfd_dst: None,
+        path_dst: 1,
+        flags: None,
+    },
+    "renameat" => &RenameHandler {
+        relfd_src: Some(0),
+        path_src: 1,
+        relfd_dst: Some(2),
+        path_dst: 3,
+        flags: None,
+    },
+    "renameat2" => &RenameHandler {
+        relfd_src: Some(0),
+        path_src: 1,
+        relfd_dst: Some(2),
+        path_dst: 3,
+        flags: Some(4),
+    },
+    "rmdir" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Never,
+        action: ProgramAction::Remove,
+    },
+    "sched_setscheduler" => &SetSchedulerHandler { policy: 1 },
+    "sendto" => &NetworkHandler { fd: 0, sockaddr: 4 },
+    "setsockopt" => &SetsockoptHandler {
+        fd: 0,
+        level: 1,
+        optname: 2,
+        optval: 3,
+    },
+    "setxattr" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Write,
+    },
+    "setxattrat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::UnlessNoFollowFlag {
+            flags: 2,
+            no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+        },
+        action: ProgramAction::Write,
+    },
+    "shmctl" => &ShmCtlHandler { op: 1 },
+    "socket" => &SocketHandler { af: 0, flags: 1 },
+    "stat" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Read,
+    },
+    "statfs" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Read,
+    },
+    "statx" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::UnlessNoFollowFlag {
+            flags: 2,
+            no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+        },
+        action: ProgramAction::Read,
+    },
+    "symlink" => &PathHandler {
+        relfd: None,
+        path: 1,
+        follow: FollowSymlink::Never,
+        action: ProgramAction::Create,
+    },
+    "symlinkat" => &PathHandler {
+        relfd: Some(1),
+        path: 2,
+        follow: FollowSymlink::Never,
+        action: ProgramAction::Create,
+    },
+    "timer_create" => &TimerCreateHandler { clockid: 0 },
+    "truncate" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Write,
+    },
+    "unlink" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Never,
+        action: ProgramAction::Remove,
+    },
+    "unlinkat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::Never,
+        action: ProgramAction::Remove,
+    },
+    "unshare" => &UnshareHandler { flags: 0 },
+    "utime" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Write,
+    },
+    "utimensat" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::UnlessNoFollowFlag {
+            flags: 3,
+            no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+        },
+        action: ProgramAction::Write,
+    },
+    "utimes" => &PathHandler {
+        relfd: None,
+        path: 0,
+        follow: FollowSymlink::Always,
+        action: ProgramAction::Write,
+    },
+    "vfork" => &ForkHandler,
+};
 
 /// Synthetic fd-table identifier, used to group pids that share an fd table
 type FdTableId = usize;
