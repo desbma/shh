@@ -18,6 +18,8 @@ FAN_MARK_MOUNT = 0x10
 FAN_MODIFY = 2
 FAN_REPORT_FID = 0x200
 FILE_ATTR_SIZE_VER0 = 24
+FS_IOC_FSSETXATTR = 0x401C5820
+FS_IOC_SETFLAGS = 0x40086602
 IN_MODIFY = 2
 MAX_HANDLE_SZ = 128
 STATX_BASIC_STATS = 0x7FF
@@ -27,12 +29,17 @@ SYS_faccessat = 269
 SYS_faccessat2 = 439
 SYS_fanotify_init = 300
 SYS_fanotify_mark = 301
+SYS_fchmod = 91
+SYS_fchown = 93
 SYS_file_getattr = 468
 SYS_file_setattr = 469
+SYS_fremovexattr = 199
+SYS_fsetxattr = 190
 SYS_getxattr = 191
 SYS_getxattrat = 464
 SYS_inotify_add_watch = 254
 SYS_inotify_init1 = 294
+SYS_ioctl = 16
 SYS_lgetxattr = 192
 SYS_listxattr = 194
 SYS_listxattrat = 465
@@ -96,6 +103,10 @@ match kind:
         )
         if not select.select([fd], [], [], EVENT_TIMEOUT_S)[0]:
             raise TimeoutError(f"No event from the mount of {path}")
+    case "fchmod":
+        check(libc.syscall(SYS_fchmod, os.open(path, os.O_RDONLY), 0o600))
+    case "fchown":
+        check(libc.syscall(SYS_fchown, os.open(path, os.O_RDONLY), -1, -1))
     case "file_getattr":
         check(
             libc.syscall(
@@ -115,6 +126,23 @@ match kind:
                 p,
                 buf,
                 ctypes.c_size_t(FILE_ATTR_SIZE_VER0),
+                0,
+            )
+        )
+    case "fremovexattr":
+        check(
+            libc.syscall(SYS_fremovexattr, os.open(path, os.O_RDONLY), b"user.absent"),
+            errno.ENODATA,
+        )
+    case "fsetxattr":
+        value = b"value"
+        check(
+            libc.syscall(
+                SYS_fsetxattr,
+                os.open(path, os.O_RDONLY),
+                b"user.test",
+                value,
+                ctypes.c_size_t(len(value)),
                 0,
             )
         )
@@ -144,6 +172,14 @@ match kind:
                 IN_MODIFY,
             )
         )
+    case "ioctl-fssetxattr":
+        # Zeroed struct fsxattr, the attributes of a new tmpfs file
+        check(
+            libc.syscall(SYS_ioctl, os.open(path, os.O_RDONLY), FS_IOC_FSSETXATTR, buf)
+        )
+    case "ioctl-setflags":
+        # Zeroed flags, those of a new tmpfs file
+        check(libc.syscall(SYS_ioctl, os.open(path, os.O_RDONLY), FS_IOC_SETFLAGS, buf))
     case "lgetxattr":
         check(libc.syscall(SYS_lgetxattr, p, b"user.absent", buf, size), errno.ENODATA)
     case "listxattr":

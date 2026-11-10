@@ -818,6 +818,18 @@ mod tests {
     }
 
     #[test]
+    fn char_literal() {
+        let _ = simple_logger::SimpleLogger::new().init();
+        assert_snapshot!(
+            parse_line(
+                r"17266      0.000026 ioctl(8<\x2f\x64\x65\x76\x2f\x73\x67\x30>, SG_IO, {interface_id='S', dxfer_direction=0 /* SG_DXFER_??? */, cmd_len=0, cmdp=NULL, mx_sb_len=0, iovec_count=0, dxfer_len=0, timeout=0, flags=0, status=0, masked_status=0, msg_status=0, sb_len_wr=0, sbp=NULL, host_status=0, driver_status=0, resid=0, duration=0, info=0}) = -1 ENOTTY (Inappropriate ioctl for device)",
+                &HashSet::from(["ioctl"]),
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
     fn negated_symbol() {
         let _ = simple_logger::SimpleLogger::new().init();
         assert_snapshot!(

@@ -501,7 +501,7 @@ impl SyscallHandler for MmapHandler {
         &self,
         sc: &Syscall,
         actions: &mut Vec<ProgramAction>,
-        _state: &mut ProgramState,
+        state: &mut ProgramState,
     ) -> Result<(), HandlerError> {
         let prot = self.prot.extract(sc)?;
         let flags = self.flags.extract(sc)?;
@@ -526,12 +526,8 @@ impl SyscallHandler for MmapHandler {
                 actions.push(ProgramAction::LockMemoryMapping);
             }
         }
-        let path = fd
-            .and_then(|e| e.metadata())
-            .map(|m| PathBuf::from(OsStr::from_bytes(m)));
         if prot_val.is_flag_set("PROT_EXEC") {
-            if let Some(mut path) = path {
-                traverse_symlinks(&mut path, actions);
+            if let Some(path) = fd.and_then(|fd| fd_path(fd, actions, &state.cur_dir)) {
                 actions.push(ProgramAction::Exec(path));
             }
             if sc.name.ends_with("mprotect") || prot_val.is_flag_set("PROT_WRITE") {
@@ -1153,6 +1149,14 @@ impl SyscallHandler for SetsockoptHandler {
     }
 }
 
+/// Push the actions to reach the path of a file descriptor, and return that path
+fn fd_path(fd: &Expression, actions: &mut Vec<ProgramAction>, cur_dir: &Path) -> Option<PathBuf> {
+    let path = Path::new(OsStr::from_bytes(fd.metadata()?));
+    let mut path = resolve_path(path, None, cur_dir)?;
+    traverse_symlinks(&mut path, actions);
+    Some(path)
+}
+
 /// Handle stat-like syscalls operating on file descriptors
 pub(crate) struct StatFdHandler {
     pub fd: usize,
@@ -1165,14 +1169,61 @@ impl SyscallHandler for StatFdHandler {
         actions: &mut Vec<ProgramAction>,
         state: &mut ProgramState,
     ) -> Result<(), HandlerError> {
-        let fd = self.fd.extract(sc)?;
-
-        let Some(path) = fd.metadata().map(|m| PathBuf::from(OsStr::from_bytes(m))) else {
-            return Ok(());
-        };
-        if let Some(mut path) = resolve_path(&path, None, state.cur_dir.as_ref()) {
-            traverse_symlinks(&mut path, actions);
+        if let Some(path) = fd_path(self.fd.extract(sc)?, actions, &state.cur_dir) {
             actions.push(ProgramAction::Read(path));
+        }
+        Ok(())
+    }
+}
+
+/// Handle syscalls changing the attributes of the file of a descriptor
+pub(crate) struct FdWriteHandler {
+    pub fd: usize,
+}
+
+impl SyscallHandler for FdWriteHandler {
+    fn handle(
+        &self,
+        sc: &Syscall,
+        actions: &mut Vec<ProgramAction>,
+        state: &mut ProgramState,
+    ) -> Result<(), HandlerError> {
+        if let Some(path) = fd_path(self.fd.extract(sc)?, actions, &state.cur_dir) {
+            actions.push(ProgramAction::Write(path));
+        }
+        Ok(())
+    }
+}
+
+/// Handle `ioctl` syscall
+pub(crate) struct IoctlHandler {
+    pub fd: usize,
+    pub request: usize,
+}
+
+impl SyscallHandler for IoctlHandler {
+    fn handle(
+        &self,
+        sc: &Syscall,
+        actions: &mut Vec<ProgramAction>,
+        state: &mut ProgramState,
+    ) -> Result<(), HandlerError> {
+        /// Requests changing the attributes of the file of the descriptor
+        const ATTR_WRITE_REQUESTS: [&str; 5] = [
+            "FS_IOC_ENABLE_VERITY",
+            "FS_IOC_FSSETXATTR",
+            "FS_IOC_SETFLAGS",
+            "FS_IOC_SETVERSION",
+            "FS_IOC_SET_ENCRYPTION_POLICY",
+        ];
+        let request = unpack_expr!(
+            self.request.extract(sc)?,
+            Expression::Integer(IntegerExpression { value, .. }) => value
+        );
+        if ATTR_WRITE_REQUESTS.iter().any(|r| request.is_flag_set(r))
+            && let Some(path) = fd_path(self.fd.extract(sc)?, actions, &state.cur_dir)
+        {
+            actions.push(ProgramAction::Write(path));
         }
         Ok(())
     }
@@ -1525,17 +1576,14 @@ fn path_symlinks(in_path: &mut PathBuf) -> io::Result<Vec<PathBuf>> {
 
 fn is_fd_pseudo_path(path: &[u8]) -> bool {
     #[expect(clippy::unwrap_used)]
-    static FD_PSEUDO_PATH_REGEX_BYTES: LazyLock<regex::bytes::Regex> =
-        LazyLock::new(|| regex::bytes::Regex::new(r"^[a-z]+:\[[0-9a-z]+\]/?$").unwrap());
+    static FD_PSEUDO_PATH_REGEX_BYTES: LazyLock<regex::bytes::Regex> = LazyLock::new(|| {
+        regex::bytes::Regex::new(r"^(?:[a-z]+:\[[0-9a-z]+\]/?$|/memfd:)").unwrap()
+    });
     FD_PSEUDO_PATH_REGEX_BYTES.is_match(path)
 }
 
 fn is_pseudo_path(path: &Path) -> bool {
-    #[expect(clippy::unwrap_used)]
-    static FD_PSEUDO_PATH_REGEX_STR: LazyLock<regex::Regex> =
-        LazyLock::new(|| regex::Regex::new(r"^[a-z]+:\[[0-9a-z]+\]/?$").unwrap());
-    path.to_str()
-        .is_some_and(|p| FD_PSEUDO_PATH_REGEX_STR.is_match(p))
+    is_fd_pseudo_path(path.as_os_str().as_bytes())
 }
 
 /// Parse ELF and return interpreter path if we can

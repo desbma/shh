@@ -8,7 +8,7 @@ use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take, take_until},
     character::complete::{
-        self, alpha1, alphanumeric1, char, digit1, hex_digit1, oct_digit1, space1,
+        self, alpha1, alphanumeric1, char, digit1, hex_digit1, none_of, oct_digit1, space1,
     },
     combinator::{map, map_opt, map_res, opt, peek, recognize, rest, value, verify},
     multi::{count, many_till, many0_count, separated_list0, separated_list1},
@@ -665,6 +665,7 @@ fn parse_int_literal(i: &str) -> IResult<&str, IntegerExpression> {
                 parse_int_literal_hexa,
                 parse_int_literal_oct,
                 parse_int_literal_dec,
+                parse_int_literal_char,
             )),
             parse_int_metadata,
         ),
@@ -800,6 +801,36 @@ fn parse_int_literal_oct(i: &str) -> IResult<&str, i64> {
 fn parse_int_literal_dec(i: &str) -> IResult<&str, i64> {
     dbg_parser_entry!(i);
     complete::i64(i)
+}
+
+#[function_name::named]
+fn parse_int_literal_char(i: &str) -> IResult<&str, i64> {
+    dbg_parser_entry!(i);
+    map(
+        delimited(
+            char('\''),
+            alt((
+                parse_buffer_byte,
+                preceded(
+                    char('\\'),
+                    alt((
+                        value(b'\t', char('t')),
+                        value(b'\n', char('n')),
+                        value(0x0b, char('v')),
+                        value(0x0c, char('f')),
+                        value(b'\r', char('r')),
+                        value(b'\'', char('\'')),
+                        value(b'\\', char('\\')),
+                    )),
+                ),
+                map_opt(none_of(r"'\"), |c| u8::try_from(c).ok()),
+            )),
+            char('\''),
+        ),
+        i64::from,
+    )
+    .parse(i)
+    .inspect(|r| dbg_parser_success!(r))
 }
 
 // Buffer
@@ -949,6 +980,23 @@ mod tests {
                 )]))
             )
         );
+    }
+
+    #[test]
+    fn parse_int_literal_char_works() {
+        for (input, value) in [
+            ("'S'", 0x53),
+            (r"'\x00'", 0),
+            (r"'\''", 0x27),
+            (r"'\\'", 0x5c),
+            (r"'\t'", 0x09),
+            (r"'\n'", 0x0a),
+            (r"'\v'", 0x0b),
+            (r"'\f'", 0x0c),
+            (r"'\r'", 0x0d),
+        ] {
+            assert_eq!(parse_int_literal_char(input).unwrap(), ("", value));
+        }
     }
 
     #[test]

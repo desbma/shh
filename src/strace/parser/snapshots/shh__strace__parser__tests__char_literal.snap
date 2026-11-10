@@ -1,0 +1,150 @@
+---
+source: src/strace/parser/mod.rs
+expression: "parse_line(r\"17266      0.000026 ioctl(8<\\x2f\\x64\\x65\\x76\\x2f\\x73\\x67\\x30>, SG_IO, {interface_id='S', dxfer_direction=0 /* SG_DXFER_??? */, cmd_len=0, cmdp=NULL, mx_sb_len=0, iovec_count=0, dxfer_len=0, timeout=0, flags=0, status=0, masked_status=0, msg_status=0, sb_len_wr=0, sbp=NULL, host_status=0, driver_status=0, resid=0, duration=0, info=0}) = -1 ENOTTY (Inappropriate ioctl for device)\",\n&HashSet::from([\"ioctl\"]),).unwrap()"
+---
+Parsed(Syscall(Syscall(
+  pid: 17266,
+  rel_ts: 2.6e-5,
+  name: "ioctl",
+  args: [
+    Integer(IntegerExpression(
+      value: Literal(8),
+      metadata: Some([
+        47,
+        100,
+        101,
+        118,
+        47,
+        115,
+        103,
+        48,
+      ]),
+    )),
+    Integer(IntegerExpression(
+      value: NamedSymbol(Unambiguous("SG_IO")),
+      metadata: None,
+    )),
+    Struct({
+      "cmd_len": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "cmdp": Integer(IntegerExpression(
+        value: NamedSymbol(Unambiguous("NULL")),
+        metadata: None,
+      )),
+      "driver_status": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "duration": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "dxfer_direction": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "dxfer_len": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "flags": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "host_status": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "info": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "interface_id": Integer(IntegerExpression(
+        value: Literal(83),
+        metadata: None,
+      )),
+      "iovec_count": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "masked_status": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "msg_status": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "mx_sb_len": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "resid": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "sb_len_wr": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "sbp": Integer(IntegerExpression(
+        value: NamedSymbol(Unambiguous("NULL")),
+        metadata: None,
+      )),
+      "status": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "timeout": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+    }),
+  ],
+  ret_val: Some(IntegerExpression(
+    value: Literal(-1),
+    metadata: Some([
+      69,
+      78,
+      79,
+      84,
+      84,
+      89,
+      32,
+      40,
+      73,
+      110,
+      97,
+      112,
+      112,
+      114,
+      111,
+      112,
+      114,
+      105,
+      97,
+      116,
+      101,
+      32,
+      105,
+      111,
+      99,
+      116,
+      108,
+      32,
+      102,
+      111,
+      114,
+      32,
+      100,
+      101,
+      118,
+      105,
+      99,
+      101,
+      41,
+    ]),
+  )),
+)))

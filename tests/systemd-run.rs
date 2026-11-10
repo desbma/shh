@@ -85,6 +85,17 @@ if kind == 'mkdir-p':
     /// Python script making a syscall of a given kind on a path
     const PATH_SYSCALL_SCRIPT: &str = include_str!("path_syscall.py");
 
+    /// Build the command making a syscall of a given kind on a path
+    fn path_syscall_cmd<'a>(kind: &'a str, path: &'a Path) -> [&'a str; 5] {
+        [
+            "python3",
+            "-c",
+            PATH_SYSCALL_SCRIPT,
+            kind,
+            path.to_str().unwrap(),
+        ]
+    }
+
     /// Run `shh run` for a given command, and return generated systemd options
     fn generate_options(cmd: &[&str], run_opts: &[&str]) -> Vec<String> {
         const START_OPTION_OUTPUT_SNIPPET_PREFIX: &str =
@@ -702,14 +713,7 @@ ptrace(PTRACE_DETACH, target_pid)
         // Create a file with the openat2 syscall, a write to its directory
         let dir = tempfile::tempdir_in("/var/lib").unwrap();
         let path = dir.path().join("file");
-        let cmd = [
-            "python3",
-            "-c",
-            PATH_SYSCALL_SCRIPT,
-            "openat2",
-            path.to_str().unwrap(),
-        ];
-        profile_and_run_creating_path(&cmd, &path);
+        profile_and_run_creating_path(&path_syscall_cmd("openat2", &path), &path);
     }
 
     #[test]
@@ -1006,14 +1010,7 @@ else:
         }
         let file = tempfile::NamedTempFile::new_in("/var/lib").unwrap();
         for kind in ["setxattrat", "removexattrat"] {
-            let cmd = [
-                "python3",
-                "-c",
-                PATH_SYSCALL_SCRIPT,
-                kind,
-                file.path().to_str().unwrap(),
-            ];
-            profile_and_run(&cmd, false);
+            profile_and_run(&path_syscall_cmd(kind, file.path()), false);
         }
     }
 
@@ -1026,14 +1023,23 @@ else:
             return;
         }
         let file = tempfile::NamedTempFile::new_in("/var/lib").unwrap();
-        let cmd = [
-            "python3",
-            "-c",
-            PATH_SYSCALL_SCRIPT,
-            "file_setattr",
-            file.path().to_str().unwrap(),
-        ];
-        profile_and_run(&cmd, false);
+        profile_and_run(&path_syscall_cmd("file_setattr", file.path()), false);
+    }
+
+    #[test]
+    fn systemd_run_fd_write() {
+        // Change the metadata of a file opened read-only, on the tmpfs of the test environment
+        let file = tempfile::NamedTempFile::new_in("/mnt/tmp").unwrap();
+        for kind in [
+            "fchmod",
+            "fchown",
+            "fremovexattr",
+            "fsetxattr",
+            "ioctl-fssetxattr",
+            "ioctl-setflags",
+        ] {
+            profile_and_run(&path_syscall_cmd(kind, file.path()), false);
+        }
     }
 
     #[test]
@@ -1075,14 +1081,7 @@ else:
                 eprintln!("Kernel or strace without {kind}, skipping");
                 continue;
             }
-            let cmd = [
-                "python3",
-                "-c",
-                PATH_SYSCALL_SCRIPT,
-                kind,
-                path.to_str().unwrap(),
-            ];
-            profile_and_run(&cmd, false);
+            profile_and_run(&path_syscall_cmd(kind, path), false);
         }
     }
 
@@ -1099,14 +1098,7 @@ else:
                 thread::sleep(WRITE_INTERVAL);
             }
         });
-        let cmd = [
-            "python3",
-            "-c",
-            PATH_SYSCALL_SCRIPT,
-            "fanotify_mark-mount",
-            file.path().to_str().unwrap(),
-        ];
-        profile_and_run(&cmd, false);
+        profile_and_run(&path_syscall_cmd("fanotify_mark-mount", file.path()), false);
     }
 
     #[test]

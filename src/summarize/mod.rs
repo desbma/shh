@@ -21,10 +21,10 @@ mod handlers;
 
 use handlers::{
     AccessHandler, ChdirHandler, Clone3Handler, EpollCtlHandler, ExecHandler, FanotifyMarkHandler,
-    FollowSymlink, ForkHandler, KillHandler, LinkHandler, MemfdCreateHandler, MknodHandler,
-    MmapHandler, MountHandler, NetworkHandler, OpenHandler, PathHandler, RenameHandler,
-    SetSchedulerHandler, SetsockoptHandler, ShmCtlHandler, SocketHandler, StatFdHandler,
-    SyscallHandler, TimerCreateHandler, UnshareHandler,
+    FdWriteHandler, FollowSymlink, ForkHandler, IoctlHandler, KillHandler, LinkHandler,
+    MemfdCreateHandler, MknodHandler, MmapHandler, MountHandler, NetworkHandler, OpenHandler,
+    PathHandler, RenameHandler, SetSchedulerHandler, SetsockoptHandler, ShmCtlHandler,
+    SocketHandler, StatFdHandler, SyscallHandler, TimerCreateHandler, UnshareHandler,
 };
 
 /// A high level program runtime action
@@ -357,6 +357,7 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
     "fchdir" => &ChdirHandler {
         path: FdOrPath::Fd(0),
     },
+    "fchmod" => &FdWriteHandler { fd: 0 },
     "fchmodat" => &PathHandler {
         relfd: Some(0),
         path: 1,
@@ -372,6 +373,7 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
         },
         action: ProgramAction::Write,
     },
+    "fchown" => &FdWriteHandler { fd: 0 },
     "fchownat" => &PathHandler {
         relfd: Some(0),
         path: 1,
@@ -400,6 +402,8 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
         action: ProgramAction::Write,
     },
     "fork" => &ForkHandler,
+    "fremovexattr" => &FdWriteHandler { fd: 0 },
+    "fsetxattr" => &FdWriteHandler { fd: 0 },
     "fstat" => &StatFdHandler { fd: 0 },
     "futimesat" => &PathHandler {
         relfd: Some(0),
@@ -432,6 +436,7 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
         },
         action: ProgramAction::Read,
     },
+    "ioctl" => &IoctlHandler { fd: 0, request: 1 },
     "kill" => &KillHandler { pid: 0, sig: 1 },
     "lchown" => &PathHandler {
         relfd: None,
@@ -1441,6 +1446,148 @@ mod tests {
                 ProgramAction::Write("/var/lib/test".into()),
                 ProgramAction::Syscalls(["utimensat".into()].into()),
             ]
+        );
+    }
+
+    #[test]
+    fn fd_writes_write_fd_path() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        // Descriptor of a file opened read-only
+        let fd = fd_expr(3, "/var/lib/test");
+        for sc in [
+            make_syscall("fchmod", vec![fd.clone(), int_literal(0o640)], 0),
+            make_syscall(
+                "fchown",
+                vec![fd.clone(), int_literal(0), int_literal(0)],
+                0,
+            ),
+            make_syscall(
+                "fsetxattr",
+                vec![
+                    fd.clone(),
+                    buf_expr(b"user.test"),
+                    buf_expr(b"x"),
+                    int_literal(1),
+                    int_literal(0),
+                ],
+                0,
+            ),
+            // Failing with ENODATA on an absent attribute, after the mount write check
+            make_failed_syscall(
+                "fremovexattr",
+                vec![fd.clone(), buf_expr(b"user.absent")],
+                "ENODATA",
+            ),
+            make_syscall(
+                "ioctl",
+                vec![
+                    fd.clone(),
+                    named_symbol("FS_IOC_SETFLAGS"),
+                    Expression::Collection {
+                        complement: false,
+                        values: vec![(None, int_literal(0))],
+                    },
+                ],
+                0,
+            ),
+            make_syscall(
+                "ioctl",
+                vec![
+                    fd.clone(),
+                    named_symbol("FS_IOC_FSSETXATTR"),
+                    Expression::Struct(HashMap::from([("fsx_xflags".to_owned(), int_literal(0))])),
+                ],
+                0,
+            ),
+            make_syscall(
+                "ioctl",
+                vec![
+                    fd.clone(),
+                    named_symbol("FS_IOC_SETVERSION"),
+                    buf_expr(b"\x00\x00\x00\x00\x00\x00\x00\x00"),
+                ],
+                0,
+            ),
+            make_syscall(
+                "ioctl",
+                vec![
+                    fd.clone(),
+                    named_symbol("FS_IOC_ENABLE_VERITY"),
+                    int_literal(0x7ffd_0e48_4cc0),
+                ],
+                0,
+            ),
+            make_syscall(
+                "ioctl",
+                vec![
+                    fd.clone(),
+                    named_symbol("FS_IOC_SET_ENCRYPTION_POLICY"),
+                    int_literal(0x7ffd_0e48_4cc0),
+                ],
+                0,
+            ),
+        ] {
+            let name = sc.name.clone();
+            assert_eq!(
+                summarize_syscall(sc),
+                vec![
+                    ProgramAction::Write("/var/lib/test".into()),
+                    ProgramAction::Syscalls([name].into()),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn pseudo_fd_paths_ignored() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let memfd = fd_expr(4, "/memfd:review");
+        for sc in [
+            make_syscall(
+                "fchmod",
+                vec![fd_expr(3, "pipe:[123]"), int_literal(0o600)],
+                0,
+            ),
+            make_syscall("fchmod", vec![memfd.clone(), int_literal(0o600)], 0),
+            make_syscall(
+                "mmap",
+                vec![
+                    named_symbol("NULL"),
+                    int_literal(4096),
+                    binary_or_flags(&["PROT_READ", "PROT_EXEC"]),
+                    named_symbol("MAP_SHARED"),
+                    memfd,
+                    int_literal(0),
+                ],
+                0x7f00_0000_0000,
+            ),
+        ] {
+            let name = sc.name.clone();
+            assert_eq!(
+                summarize_syscall(sc),
+                vec![ProgramAction::Syscalls([name].into())]
+            );
+        }
+    }
+
+    #[test]
+    fn ioctl_other_request_writes_nothing() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let sc = make_syscall(
+            "ioctl",
+            vec![
+                fd_expr(0, "/dev/pts/0"),
+                named_symbol("TCGETS"),
+                Expression::Struct(HashMap::from([("c_iflag".to_owned(), int_literal(0))])),
+            ],
+            0,
+        );
+        assert_eq!(
+            summarize_syscall(sc),
+            vec![ProgramAction::Syscalls(["ioctl".into()].into())]
         );
     }
 
