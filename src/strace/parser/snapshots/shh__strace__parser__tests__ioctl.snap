@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 671
 expression: "parse_line(\"34274      0.000058 ioctl(1<\\\\x2f\\\\x64\\\\x65\\\\x76\\\\x2f\\\\x70\\\\x74\\\\x73\\\\x2f\\\\x30>, TCSETSW, {c_iflag=ICRNL|IXON|IUTF8, c_oflag=NL0|CR0|TAB0|BS0|VT0|FF0|OPOST|ONLCR, c_cflag=B38400|CS8|CREAD, c_lflag=ISIG|ICANON|ECHO|ECHOE|ECHOK|IEXTEN|ECHOCTL|ECHOKE, c_line=N_TTY, c_cc=[[VINTR]=0x3, [VQUIT]=0x1c, [VERASE]=0x7f, [VKILL]=0x15, [VEOF]=0x4, [VTIME]=0, [VMIN]=0x1, [VSWTC]=0, [VSTART]=0x11, [VSTOP]=0x13, [VSUSP]=0x1a, [VEOL]=0, [VREPRINT]=0x12, [VDISCARD]=0xf, [VWERASE]=0x17, [VLNEXT]=0x16, [VEOL2]=0, [17]=0, [18]=0]}) = 0\",\n&HashSet::from([\"ioctl\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -23,7 +24,7 @@ Parsed(Syscall(Syscall(
       ]),
     )),
     Integer(IntegerExpression(
-      value: NamedSymbol("TCSETSW"),
+      value: NamedSymbol(Unambiguous("TCSETSW")),
       metadata: None,
     )),
     Struct({
@@ -31,119 +32,119 @@ Parsed(Syscall(Syscall(
         complement: false,
         values: [
           (Some(IntegerExpression(
-            value: NamedSymbol("VINTR"),
+            value: NamedSymbol(Unambiguous("VINTR")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(3),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VQUIT"),
+            value: NamedSymbol(Unambiguous("VQUIT")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(28),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VERASE"),
+            value: NamedSymbol(Unambiguous("VERASE")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(127),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VKILL"),
+            value: NamedSymbol(Unambiguous("VKILL")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(21),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VEOF"),
+            value: NamedSymbol(Unambiguous("VEOF")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(4),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VTIME"),
+            value: NamedSymbol(Unambiguous("VTIME")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(0),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VMIN"),
+            value: NamedSymbol(Unambiguous("VMIN")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(1),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VSWTC"),
+            value: NamedSymbol(Unambiguous("VSWTC")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(0),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VSTART"),
+            value: NamedSymbol(Unambiguous("VSTART")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(17),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VSTOP"),
+            value: NamedSymbol(Unambiguous("VSTOP")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(19),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VSUSP"),
+            value: NamedSymbol(Unambiguous("VSUSP")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(26),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VEOL"),
+            value: NamedSymbol(Unambiguous("VEOL")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(0),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VREPRINT"),
+            value: NamedSymbol(Unambiguous("VREPRINT")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(18),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VDISCARD"),
+            value: NamedSymbol(Unambiguous("VDISCARD")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(15),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VWERASE"),
+            value: NamedSymbol(Unambiguous("VWERASE")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(23),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VLNEXT"),
+            value: NamedSymbol(Unambiguous("VLNEXT")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(22),
             metadata: None,
           ))),
           (Some(IntegerExpression(
-            value: NamedSymbol("VEOL2"),
+            value: NamedSymbol(Unambiguous("VEOL2")),
             metadata: None,
           )), Integer(IntegerExpression(
             value: Literal(0),
@@ -167,47 +168,47 @@ Parsed(Syscall(Syscall(
       ),
       "c_cflag": Integer(IntegerExpression(
         value: BinaryOr([
-          NamedSymbol("B38400"),
-          NamedSymbol("CS8"),
-          NamedSymbol("CREAD"),
+          NamedSymbol(Unambiguous("B38400")),
+          NamedSymbol(Unambiguous("CS8")),
+          NamedSymbol(Unambiguous("CREAD")),
         ]),
         metadata: None,
       )),
       "c_iflag": Integer(IntegerExpression(
         value: BinaryOr([
-          NamedSymbol("ICRNL"),
-          NamedSymbol("IXON"),
-          NamedSymbol("IUTF8"),
+          NamedSymbol(Unambiguous("ICRNL")),
+          NamedSymbol(Unambiguous("IXON")),
+          NamedSymbol(Unambiguous("IUTF8")),
         ]),
         metadata: None,
       )),
       "c_lflag": Integer(IntegerExpression(
         value: BinaryOr([
-          NamedSymbol("ISIG"),
-          NamedSymbol("ICANON"),
-          NamedSymbol("ECHO"),
-          NamedSymbol("ECHOE"),
-          NamedSymbol("ECHOK"),
-          NamedSymbol("IEXTEN"),
-          NamedSymbol("ECHOCTL"),
-          NamedSymbol("ECHOKE"),
+          NamedSymbol(Unambiguous("ISIG")),
+          NamedSymbol(Unambiguous("ICANON")),
+          NamedSymbol(Unambiguous("ECHO")),
+          NamedSymbol(Unambiguous("ECHOE")),
+          NamedSymbol(Unambiguous("ECHOK")),
+          NamedSymbol(Unambiguous("IEXTEN")),
+          NamedSymbol(Unambiguous("ECHOCTL")),
+          NamedSymbol(Unambiguous("ECHOKE")),
         ]),
         metadata: None,
       )),
       "c_line": Integer(IntegerExpression(
-        value: NamedSymbol("N_TTY"),
+        value: NamedSymbol(Unambiguous("N_TTY")),
         metadata: None,
       )),
       "c_oflag": Integer(IntegerExpression(
         value: BinaryOr([
-          NamedSymbol("NL0"),
-          NamedSymbol("CR0"),
-          NamedSymbol("TAB0"),
-          NamedSymbol("BS0"),
-          NamedSymbol("VT0"),
-          NamedSymbol("FF0"),
-          NamedSymbol("OPOST"),
-          NamedSymbol("ONLCR"),
+          NamedSymbol(Unambiguous("NL0")),
+          NamedSymbol(Unambiguous("CR0")),
+          NamedSymbol(Unambiguous("TAB0")),
+          NamedSymbol(Unambiguous("BS0")),
+          NamedSymbol(Unambiguous("VT0")),
+          NamedSymbol(Unambiguous("FF0")),
+          NamedSymbol(Unambiguous("OPOST")),
+          NamedSymbol(Unambiguous("ONLCR")),
         ]),
         metadata: None,
       )),

@@ -1,0 +1,162 @@
+---
+source: src/strace/parser/mod.rs
+expression: "parse_line(r#\"2358       0.000037 recvfrom(5<\\x73\\x6f\\x63\\x6b\\x65\\x74\\x3a\\x5b\\x31\\x30\\x36\\x32\\x30\\x38\\x37\\x36\\x5d>, [{nlmsg_len=48, nlmsg_type=NLMSG_ERROR, nlmsg_flags=0, nlmsg_seq=2, nlmsg_pid=-410299790}, {error=-EPERM, msg=[{nlmsg_len=28, nlmsg_type=TASKSTATS, nlmsg_flags=NLM_F_REQUEST, nlmsg_seq=2, nlmsg_pid=-410299790}, {cmd=0x1, version=0}, [{nla_len=8, nla_type=0x1}, \"\\x01\\x00\\x00\\x00\"]]}], 16384, 0, {sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, [12]) = 48\"#,\n&HashSet::from([\"recvfrom\"]),).unwrap()"
+---
+Parsed(Syscall(Syscall(
+  pid: 2358,
+  rel_ts: 3.7e-5,
+  name: "recvfrom",
+  args: [
+    Integer(IntegerExpression(
+      value: Literal(5),
+      metadata: Some([
+        115,
+        111,
+        99,
+        107,
+        101,
+        116,
+        58,
+        91,
+        49,
+        48,
+        54,
+        50,
+        48,
+        56,
+        55,
+        54,
+        93,
+      ]),
+    )),
+    Collection(
+      complement: false,
+      values: [
+        (None, Struct({
+          "nlmsg_flags": Integer(IntegerExpression(
+            value: Literal(0),
+            metadata: None,
+          )),
+          "nlmsg_len": Integer(IntegerExpression(
+            value: Literal(48),
+            metadata: None,
+          )),
+          "nlmsg_pid": Integer(IntegerExpression(
+            value: Literal(-410299790),
+            metadata: None,
+          )),
+          "nlmsg_seq": Integer(IntegerExpression(
+            value: Literal(2),
+            metadata: None,
+          )),
+          "nlmsg_type": Integer(IntegerExpression(
+            value: NamedSymbol(Unambiguous("NLMSG_ERROR")),
+            metadata: None,
+          )),
+        })),
+        (None, Struct({
+          "error": Integer(IntegerExpression(
+            value: Negation(NamedSymbol(Unambiguous("EPERM"))),
+            metadata: None,
+          )),
+          "msg": Collection(
+            complement: false,
+            values: [
+              (None, Struct({
+                "nlmsg_flags": Integer(IntegerExpression(
+                  value: NamedSymbol(Unambiguous("NLM_F_REQUEST")),
+                  metadata: None,
+                )),
+                "nlmsg_len": Integer(IntegerExpression(
+                  value: Literal(28),
+                  metadata: None,
+                )),
+                "nlmsg_pid": Integer(IntegerExpression(
+                  value: Literal(-410299790),
+                  metadata: None,
+                )),
+                "nlmsg_seq": Integer(IntegerExpression(
+                  value: Literal(2),
+                  metadata: None,
+                )),
+                "nlmsg_type": Integer(IntegerExpression(
+                  value: NamedSymbol(Unambiguous("TASKSTATS")),
+                  metadata: None,
+                )),
+              })),
+              (None, Struct({
+                "cmd": Integer(IntegerExpression(
+                  value: Literal(1),
+                  metadata: None,
+                )),
+                "version": Integer(IntegerExpression(
+                  value: Literal(0),
+                  metadata: None,
+                )),
+              })),
+              (None, Collection(
+                complement: false,
+                values: [
+                  (None, Struct({
+                    "nla_len": Integer(IntegerExpression(
+                      value: Literal(8),
+                      metadata: None,
+                    )),
+                    "nla_type": Integer(IntegerExpression(
+                      value: Literal(1),
+                      metadata: None,
+                    )),
+                  })),
+                  (None, Buffer(BufferExpression(
+                    value: [
+                      1,
+                      0,
+                      0,
+                      0,
+                    ],
+                    type_: Unknown,
+                  ))),
+                ],
+              )),
+            ],
+          ),
+        })),
+      ],
+    ),
+    Integer(IntegerExpression(
+      value: Literal(16384),
+      metadata: None,
+    )),
+    Integer(IntegerExpression(
+      value: Literal(0),
+      metadata: None,
+    )),
+    Struct({
+      "nl_groups": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "nl_pid": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "sa_family": Integer(IntegerExpression(
+        value: NamedSymbol(Unambiguous("AF_NETLINK")),
+        metadata: None,
+      )),
+    }),
+    Collection(
+      complement: false,
+      values: [
+        (None, Integer(IntegerExpression(
+          value: Literal(12),
+          metadata: None,
+        ))),
+      ],
+    ),
+  ],
+  ret_val: Some(IntegerExpression(
+    value: Literal(48),
+    metadata: None,
+  )),
+)))

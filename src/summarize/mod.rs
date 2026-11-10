@@ -957,7 +957,9 @@ mod tests {
             name: "renameat".into(),
             args: vec![
                 Expression::Integer(IntegerExpression {
-                    value: IntegerExpressionValue::NamedSymbol("AT_FDCWD".to_owned()),
+                    value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(
+                        "AT_FDCWD".to_owned(),
+                    )),
                     metadata: Some(temp_dir_src.path().as_os_str().as_bytes().to_vec()),
                 }),
                 Expression::Buffer(BufferExpression {
@@ -965,7 +967,9 @@ mod tests {
                     type_: BufferType::Unknown,
                 }),
                 Expression::Integer(IntegerExpression {
-                    value: IntegerExpressionValue::NamedSymbol("AT_FDCWD".to_owned()),
+                    value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(
+                        "AT_FDCWD".to_owned(),
+                    )),
                     metadata: Some(temp_dir_dst.path().as_os_str().as_bytes().to_vec()),
                 }),
                 Expression::Buffer(BufferExpression {
@@ -973,7 +977,9 @@ mod tests {
                     type_: BufferType::Unknown,
                 }),
                 Expression::Integer(IntegerExpression {
-                    value: IntegerExpressionValue::NamedSymbol("RENAME_NOREPLACE".to_owned()),
+                    value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(
+                        "RENAME_NOREPLACE".to_owned(),
+                    )),
                     metadata: None,
                 }),
             ],
@@ -1181,7 +1187,9 @@ mod tests {
                             "st_mode".to_owned(),
                             Expression::Integer(IntegerExpression {
                                 value: IntegerExpressionValue::BinaryOr(vec![
-                                    IntegerExpressionValue::NamedSymbol("S_IFREG".to_owned()),
+                                    IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(
+                                        "S_IFREG".to_owned(),
+                                    )),
                                     IntegerExpressionValue::Literal(493),
                                 ]),
                                 metadata: None,

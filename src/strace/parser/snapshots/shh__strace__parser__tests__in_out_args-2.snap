@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 692
 expression: "parse_line(\"237494      0.000026 getpeername(3, {sa_family=AF_UNIX, sun_path=@\\\"\\\\x6e\\\\x6f\\\\x70\\\\x65\\\"}, [124 => 20]) = 0\",\n&HashSet::from([\"getpeername\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -13,7 +14,7 @@ Parsed(Syscall(Syscall(
     )),
     Struct({
       "sa_family": Integer(IntegerExpression(
-        value: NamedSymbol("AF_UNIX"),
+        value: NamedSymbol(Unambiguous("AF_UNIX")),
         metadata: None,
       )),
       "sun_path": Buffer(BufferExpression(

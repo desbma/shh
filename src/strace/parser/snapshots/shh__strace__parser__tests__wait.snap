@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 752
 expression: "parse_line(\"30192      0.000010 wait4(30247, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 30247\",\n&HashSet::from([\"wait4\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -17,7 +18,7 @@ Parsed(Syscall(Syscall(
           name: "WIFEXITED",
           args: [
             Integer(IntegerExpression(
-              value: NamedSymbol("s"),
+              value: NamedSymbol(Unambiguous("s")),
               metadata: None,
             )),
           ],
@@ -27,7 +28,7 @@ Parsed(Syscall(Syscall(
             name: "WEXITSTATUS",
             args: [
               Integer(IntegerExpression(
-                value: NamedSymbol("s"),
+                value: NamedSymbol(Unambiguous("s")),
                 metadata: None,
               )),
             ],
@@ -42,7 +43,7 @@ Parsed(Syscall(Syscall(
       metadata: None,
     )),
     Integer(IntegerExpression(
-      value: NamedSymbol("NULL"),
+      value: NamedSymbol(Unambiguous("NULL")),
       metadata: None,
     )),
   ],

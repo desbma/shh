@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 314
 expression: "parse_line(\"895683      0.000028 fstatfs(3, {f_type=PROC_SUPER_MAGIC, f_bsize=4096, f_blocks=0, f_bfree=0, f_bavail=0, f_files=0, f_ffree=0, f_fsid={val=[0, 0]}, f_namelen=255, f_frsize=4096, f_flags=ST_VALID|ST_NOSUID|ST_NODEV|ST_NOEXEC|ST_RELATIME}) = 0\",\n&HashSet::from([\"fstatfs\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -38,11 +39,11 @@ Parsed(Syscall(Syscall(
       )),
       "f_flags": Integer(IntegerExpression(
         value: BinaryOr([
-          NamedSymbol("ST_VALID"),
-          NamedSymbol("ST_NOSUID"),
-          NamedSymbol("ST_NODEV"),
-          NamedSymbol("ST_NOEXEC"),
-          NamedSymbol("ST_RELATIME"),
+          NamedSymbol(Unambiguous("ST_VALID")),
+          NamedSymbol(Unambiguous("ST_NOSUID")),
+          NamedSymbol(Unambiguous("ST_NODEV")),
+          NamedSymbol(Unambiguous("ST_NOEXEC")),
+          NamedSymbol(Unambiguous("ST_RELATIME")),
         ]),
         metadata: None,
       )),
@@ -70,7 +71,7 @@ Parsed(Syscall(Syscall(
         metadata: None,
       )),
       "f_type": Integer(IntegerExpression(
-        value: NamedSymbol("PROC_SUPER_MAGIC"),
+        value: NamedSymbol(Unambiguous("PROC_SUPER_MAGIC")),
         metadata: None,
       )),
     }),

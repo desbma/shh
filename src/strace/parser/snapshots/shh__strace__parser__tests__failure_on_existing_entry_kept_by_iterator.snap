@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 528
 expression: syscalls
 ---
 [
@@ -70,7 +71,7 @@ expression: syscalls
       )),
       Struct({
         "sa_family": Integer(IntegerExpression(
-          value: NamedSymbol("AF_UNIX"),
+          value: NamedSymbol(Unambiguous("AF_UNIX")),
           metadata: None,
         )),
         "sun_path": Buffer(BufferExpression(

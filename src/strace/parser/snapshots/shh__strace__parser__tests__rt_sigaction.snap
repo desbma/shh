@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 245
 expression: "parse_line(\"720313      0.000064 rt_sigaction(SIGTERM, {sa_handler=SIG_DFL, sa_mask=~[RTMIN RT_1], sa_flags=SA_RESTORER, sa_restorer=0x7f6da716c510}, NULL, 8) = 0\",\n&HashSet::from([\"rt_sigaction\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -8,27 +9,27 @@ Parsed(Syscall(Syscall(
   name: "rt_sigaction",
   args: [
     Integer(IntegerExpression(
-      value: NamedSymbol("SIGTERM"),
+      value: NamedSymbol(Unambiguous("SIGTERM")),
       metadata: None,
     )),
     Struct({
       "sa_flags": Integer(IntegerExpression(
-        value: NamedSymbol("SA_RESTORER"),
+        value: NamedSymbol(Unambiguous("SA_RESTORER")),
         metadata: None,
       )),
       "sa_handler": Integer(IntegerExpression(
-        value: NamedSymbol("SIG_DFL"),
+        value: NamedSymbol(Unambiguous("SIG_DFL")),
         metadata: None,
       )),
       "sa_mask": Collection(
         complement: true,
         values: [
           (None, Integer(IntegerExpression(
-            value: NamedSymbol("RTMIN"),
+            value: NamedSymbol(Unambiguous("RTMIN")),
             metadata: None,
           ))),
           (None, Integer(IntegerExpression(
-            value: NamedSymbol("RT_1"),
+            value: NamedSymbol(Unambiguous("RT_1")),
             metadata: None,
           ))),
         ],
@@ -39,7 +40,7 @@ Parsed(Syscall(Syscall(
       )),
     }),
     Integer(IntegerExpression(
-      value: NamedSymbol("NULL"),
+      value: NamedSymbol(Unambiguous("NULL")),
       metadata: None,
     )),
     Integer(IntegerExpression(

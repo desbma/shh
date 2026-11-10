@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 389
 expression: "parse_line(\"85195      0.000038 prlimit64(0, RLIMIT_NOFILE, {rlim_cur=512*1024, rlim_max=512*1024}, NULL) = 0\",\n&HashSet::from([\"prlimit64\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -12,7 +13,7 @@ Parsed(Syscall(Syscall(
       metadata: None,
     )),
     Integer(IntegerExpression(
-      value: NamedSymbol("RLIMIT_NOFILE"),
+      value: NamedSymbol(Unambiguous("RLIMIT_NOFILE")),
       metadata: None,
     )),
     Struct({
@@ -32,7 +33,7 @@ Parsed(Syscall(Syscall(
       )),
     }),
     Integer(IntegerExpression(
-      value: NamedSymbol("NULL"),
+      value: NamedSymbol(Unambiguous("NULL")),
       metadata: None,
     )),
   ],

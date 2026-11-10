@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 714
 expression: "parse_line(\"714433      0.000035 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f3f3c2f5090) = 714434\",\n&HashSet::from([\"clone\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -9,7 +10,7 @@ Parsed(Syscall(Syscall(
   args: [
     Struct({
       "child_stack": Integer(IntegerExpression(
-        value: NamedSymbol("NULL"),
+        value: NamedSymbol(Unambiguous("NULL")),
         metadata: None,
       )),
       "child_tidptr": Integer(IntegerExpression(
@@ -18,9 +19,9 @@ Parsed(Syscall(Syscall(
       )),
       "flags": Integer(IntegerExpression(
         value: BinaryOr([
-          NamedSymbol("CLONE_CHILD_CLEARTID"),
-          NamedSymbol("CLONE_CHILD_SETTID"),
-          NamedSymbol("SIGCHLD"),
+          NamedSymbol(Unambiguous("CLONE_CHILD_CLEARTID")),
+          NamedSymbol(Unambiguous("CLONE_CHILD_SETTID")),
+          NamedSymbol(Unambiguous("SIGCHLD")),
         ]),
         metadata: None,
       )),

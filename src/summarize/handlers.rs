@@ -30,7 +30,7 @@ use super::{
 use crate::{
     strace::{
         BufferExpression, BufferType, Expression, IntegerExpression, IntegerExpressionValue,
-        Syscall,
+        NamedSymbol, Syscall,
     },
     systemd::{SocketFamily, SocketProtocol},
 };
@@ -207,7 +207,7 @@ impl SyscallHandler for EpollCtlHandler {
         let op_name = unpack_expr!(
             op,
             Expression::Integer(IntegerExpression {
-                value: IntegerExpressionValue::NamedSymbol(op_name),
+                value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(op_name)),
                 ..
             }) => op_name
         );
@@ -384,7 +384,7 @@ impl SyscallHandler for KillHandler {
         let pid_val = pid_t::try_from(*pid_val).map_err(|_| err_value!(*pid_val, i64 => pid_t))?;
         let sig_name = match sig {
             Expression::Integer(IntegerExpression {
-                value: IntegerExpressionValue::NamedSymbol(sig_name),
+                value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(sig_name)),
                 ..
             }) => Some(sig_name),
             Expression::Integer(IntegerExpression {
@@ -614,7 +614,7 @@ impl SyscallHandler for NetworkHandler {
             let af = unpack_expr!(
                 af_expr,
                 Expression::Integer(IntegerExpression {
-                    value: IntegerExpressionValue::NamedSymbol(af),
+                    value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(af)),
                     ..
                 }) => af
             );
@@ -1022,7 +1022,7 @@ impl SyscallHandler for SocketHandler {
         let af_name = unpack_expr!(
             af_expr,
             Expression::Integer(IntegerExpression {
-                value: IntegerExpressionValue::NamedSymbol(af_name),
+                value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(af_name)),
                 ..
             }) => af_name
         );
@@ -1099,11 +1099,11 @@ impl SyscallHandler for SetsockoptHandler {
             (level, optname),
             (
                 Expression::Integer(IntegerExpression {
-                    value: IntegerExpressionValue::NamedSymbol(l),
+                    value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(l)),
                     ..
                 }),
                 Expression::Integer(IntegerExpression {
-                    value: IntegerExpressionValue::NamedSymbol(o),
+                    value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(o)),
                     ..
                 }),
             ) if l == "SOL_IPV6" && o == "IPV6_V6ONLY"
@@ -1195,7 +1195,7 @@ impl SyscallHandler for TimerCreateHandler {
         let clock_name = unpack_expr!(
             clockid,
             Expression::Integer(IntegerExpression {
-                value: IntegerExpressionValue::NamedSymbol(clock_name),
+                value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(clock_name)),
                 ..
             }) => clock_name
         );
@@ -1248,7 +1248,7 @@ impl PathHandler {
             }) => PathBuf::from(OsStr::from_bytes(b)),
             // A NULL path designates the relative file descriptor itself, like an empty one
             Expression::Integer(IntegerExpression {
-                value: IntegerExpressionValue::NamedSymbol(s),
+                value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(s)),
                 ..
             }) if s == "NULL" => {
                 // Without a descriptor path, the call fails or changes nothing
@@ -1799,7 +1799,7 @@ x86_Thread_features_locked:
     // Helper to create a named symbol integer expression
     pub(crate) fn named_symbol(name: &str) -> Expression {
         Expression::Integer(IntegerExpression {
-            value: IntegerExpressionValue::NamedSymbol(name.to_owned()),
+            value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(name.to_owned())),
             metadata: None,
         })
     }
@@ -1810,7 +1810,9 @@ x86_Thread_features_locked:
             value: IntegerExpressionValue::BinaryOr(
                 flags
                     .iter()
-                    .map(|f| IntegerExpressionValue::NamedSymbol(f.to_string()))
+                    .map(|f| {
+                        IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(f.to_string()))
+                    })
                     .collect(),
             ),
             metadata: None,
@@ -1873,7 +1875,7 @@ x86_Thread_features_locked:
             "events".to_owned(),
             Expression::Integer(IntegerExpression {
                 value: IntegerExpressionValue::BinaryOr(vec![IntegerExpressionValue::NamedSymbol(
-                    "EPOLLWAKEUP".to_owned(),
+                    NamedSymbol::Unambiguous("EPOLLWAKEUP".to_owned()),
                 )]),
                 metadata: None,
             }),
@@ -1902,7 +1904,9 @@ x86_Thread_features_locked:
         let event_struct = HashMap::from([(
             "events".to_owned(),
             Expression::Integer(IntegerExpression {
-                value: IntegerExpressionValue::NamedSymbol("EPOLLIN".to_owned()),
+                value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(
+                    "EPOLLIN".to_owned(),
+                )),
                 metadata: None,
             }),
         )]);
@@ -1930,7 +1934,9 @@ x86_Thread_features_locked:
         let event_struct = HashMap::from([(
             "events".to_owned(),
             Expression::Integer(IntegerExpression {
-                value: IntegerExpressionValue::NamedSymbol("EPOLLWAKEUP".to_owned()),
+                value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(
+                    "EPOLLWAKEUP".to_owned(),
+                )),
                 metadata: None,
             }),
         )]);
@@ -1983,7 +1989,9 @@ x86_Thread_features_locked:
         let event_struct = HashMap::from([(
             "events".to_owned(),
             Expression::Integer(IntegerExpression {
-                value: IntegerExpressionValue::NamedSymbol("EPOLLIN".to_owned()),
+                value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(
+                    "EPOLLIN".to_owned(),
+                )),
                 metadata: None,
             }),
         )]);
@@ -4006,7 +4014,9 @@ x86_Thread_features_locked:
     #[test]
     fn resolve_mknodat_relative() {
         let fd = Expression::Integer(IntegerExpression {
-            value: IntegerExpressionValue::NamedSymbol("AT_FDCWD".to_owned()),
+            value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(
+                "AT_FDCWD".to_owned(),
+            )),
             metadata: Some(b"/tmp".to_vec()),
         });
         let path = FdOrPath::Fd(&fd);

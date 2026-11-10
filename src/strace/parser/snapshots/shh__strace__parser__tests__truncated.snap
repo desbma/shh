@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 338
 expression: "parse_line(\"28707      0.000194 sendto(15<\\\\x73\\\\x6f\\\\x63\\\\x6b\\\\x65\\\\x74\\\\x3a\\\\x5b\\\\x35\\\\x34\\\\x31\\\\x38\\\\x32\\\\x31\\\\x33\\\\x5d>, [{nlmsg_len=20, nlmsg_type=RTM_GETADDR, nlmsg_flags=NLM_F_REQUEST|NLM_F_DUMP, nlmsg_seq=1694010548, nlmsg_pid=0}, {ifa_family=AF_UNSPEC, ...}], 20, 0, {sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, 12) = 20\",\n&HashSet::from([\"sendto\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -34,8 +35,8 @@ Parsed(Syscall(Syscall(
         (None, Struct({
           "nlmsg_flags": Integer(IntegerExpression(
             value: BinaryOr([
-              NamedSymbol("NLM_F_REQUEST"),
-              NamedSymbol("NLM_F_DUMP"),
+              NamedSymbol(Unambiguous("NLM_F_REQUEST")),
+              NamedSymbol(Unambiguous("NLM_F_DUMP")),
             ]),
             metadata: None,
           )),
@@ -52,13 +53,13 @@ Parsed(Syscall(Syscall(
             metadata: None,
           )),
           "nlmsg_type": Integer(IntegerExpression(
-            value: NamedSymbol("RTM_GETADDR"),
+            value: NamedSymbol(Unambiguous("RTM_GETADDR")),
             metadata: None,
           )),
         })),
         (None, Struct({
           "ifa_family": Integer(IntegerExpression(
-            value: NamedSymbol("AF_UNSPEC"),
+            value: NamedSymbol(Unambiguous("AF_UNSPEC")),
             metadata: None,
           )),
         })),
@@ -82,7 +83,7 @@ Parsed(Syscall(Syscall(
         metadata: None,
       )),
       "sa_family": Integer(IntegerExpression(
-        value: NamedSymbol("AF_NETLINK"),
+        value: NamedSymbol(Unambiguous("AF_NETLINK")),
         metadata: None,
       )),
     }),

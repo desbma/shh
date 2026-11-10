@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 221
 expression: "parse_line(\"601646      0.000011 mmap(0x7f2fce8dc000, 1396736, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x26000) = 0x7f2fce8dc000\",\n&HashSet::from([\"mmap\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -17,16 +18,16 @@ Parsed(Syscall(Syscall(
     )),
     Integer(IntegerExpression(
       value: BinaryOr([
-        NamedSymbol("PROT_READ"),
-        NamedSymbol("PROT_EXEC"),
+        NamedSymbol(Unambiguous("PROT_READ")),
+        NamedSymbol(Unambiguous("PROT_EXEC")),
       ]),
       metadata: None,
     )),
     Integer(IntegerExpression(
       value: BinaryOr([
-        NamedSymbol("MAP_PRIVATE"),
-        NamedSymbol("MAP_FIXED"),
-        NamedSymbol("MAP_DENYWRITE"),
+        NamedSymbol(Unambiguous("MAP_PRIVATE")),
+        NamedSymbol(Unambiguous("MAP_FIXED")),
+        NamedSymbol(Unambiguous("MAP_DENYWRITE")),
       ]),
       metadata: None,
     )),

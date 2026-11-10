@@ -10,7 +10,7 @@ use nom::{
     character::complete::{
         self, alpha1, alphanumeric1, char, digit1, hex_digit1, oct_digit1, space1,
     },
-    combinator::{map, map_opt, map_res, opt, recognize, rest, value, verify},
+    combinator::{map, map_opt, map_res, opt, peek, recognize, rest, value, verify},
     multi::{count, many_till, many0_count, separated_list0, separated_list1},
     number::complete::double,
     sequence::{delimited, pair, preceded, separated_pair, terminated},
@@ -18,7 +18,8 @@ use nom::{
 
 use super::ParseLineResult;
 use crate::strace::{
-    BufferExpression, BufferType, Expression, IntegerExpression, IntegerExpressionValue, Syscall,
+    BufferExpression, BufferType, Expression, IntegerExpression, IntegerExpressionValue,
+    NamedSymbol, Syscall,
     parser::{ParsedSyscall, SyscallEnd, SyscallStart},
 };
 
@@ -448,6 +449,23 @@ fn parse_expression_array(i: &str) -> IResult<&str, Expression> {
 #[function_name::named]
 fn parse_int(i: &str) -> IResult<&str, IntegerExpression> {
     dbg_parser_entry!(i);
+    alt((parse_int_unnamed, parse_int_named))
+        .parse(i)
+        .inspect(|r| dbg_parser_success!(r))
+}
+
+#[function_name::named]
+fn parse_int_operand(i: &str) -> IResult<&str, IntegerExpression> {
+    dbg_parser_entry!(i);
+    alt((parse_int_unnamed, parse_int_named_unambiguous))
+        .parse(i)
+        .inspect(|r| dbg_parser_success!(r))
+}
+
+/// Parse an integer expression other than a bare symbol name
+#[function_name::named]
+fn parse_int_unnamed(i: &str) -> IResult<&str, IntegerExpression> {
+    dbg_parser_entry!(i);
     alt((
         parse_int_bit_or,
         parse_int_bool_and,
@@ -457,7 +475,7 @@ fn parse_int(i: &str) -> IResult<&str, IntegerExpression> {
         parse_int_substraction,
         parse_int_left_shift,
         parse_int_literal,
-        parse_int_named,
+        parse_int_negation,
     ))
     .parse(i)
     .inspect(|r| dbg_parser_success!(r))
@@ -467,10 +485,13 @@ fn parse_int(i: &str) -> IResult<&str, IntegerExpression> {
 fn parse_int_bit_or(i: &str) -> IResult<&str, IntegerExpression> {
     dbg_parser_entry!(i);
     map(
-        separated_pair(
-            parse_int_named,
-            char('|'),
-            separated_list1(char('|'), parse_int),
+        terminated(
+            separated_pair(
+                alt((parse_int_left_shift, parse_int_named_unambiguous)),
+                char('|'),
+                separated_list1(char('|'), parse_int_operand),
+            ),
+            opt(char('|')),
         ),
         |(f, rs)| IntegerExpression {
             value: IntegerExpressionValue::BinaryOr(
@@ -499,7 +520,7 @@ fn parse_int_bool_and(i: &str) -> IResult<&str, IntegerExpression> {
         separated_pair(
             parse_int_macro,
             tag(" && "),
-            separated_list1(tag(" && "), parse_int),
+            separated_list1(tag(" && "), parse_int_operand),
         ),
         |(f, rs)| IntegerExpression {
             value: IntegerExpressionValue::BooleanAnd(
@@ -528,7 +549,7 @@ fn parse_int_equals(i: &str) -> IResult<&str, IntegerExpression> {
         separated_pair(
             parse_int_macro,
             tag(" == "),
-            separated_list1(tag(" == "), parse_int),
+            separated_list1(tag(" == "), parse_int_operand),
         ),
         |(f, rs)| IntegerExpression {
             value: IntegerExpressionValue::Equality(
@@ -584,7 +605,7 @@ fn parse_int_multiplication(i: &str) -> IResult<&str, IntegerExpression> {
         separated_pair(
             parse_int_literal,
             char('*'),
-            separated_list1(char('*'), parse_int),
+            separated_list1(char('*'), parse_int_operand),
         ),
         |(f, rs)| IntegerExpression {
             value: IntegerExpressionValue::Multiplication(
@@ -611,9 +632,9 @@ fn parse_int_substraction(i: &str) -> IResult<&str, IntegerExpression> {
     dbg_parser_entry!(i);
     map(
         separated_pair(
-            parse_int_named,
+            parse_int_named_unambiguous,
             char('-'),
-            separated_list1(char('-'), parse_int),
+            separated_list1(char('-'), parse_int_operand),
         ),
         |(f, rs)| IntegerExpression {
             value: IntegerExpressionValue::Substraction(
@@ -661,9 +682,13 @@ fn parse_int_left_shift(i: &str) -> IResult<&str, IntegerExpression> {
     dbg_parser_entry!(i);
     map(
         separated_pair(
-            alt((parse_int_literal, parse_int_named)),
+            alt((parse_int_literal, parse_int_named_unambiguous)),
             tag("<<"),
-            parse_int,
+            alt((
+                parse_int_literal,
+                parse_int_named_unambiguous,
+                delimited(char('('), parse_int_operand, char(')')),
+            )),
         ),
         |(b, s)| IntegerExpression {
             value: IntegerExpressionValue::LeftBitShift {
@@ -678,11 +703,52 @@ fn parse_int_left_shift(i: &str) -> IResult<&str, IntegerExpression> {
 }
 
 #[function_name::named]
+fn parse_int_negation(i: &str) -> IResult<&str, IntegerExpression> {
+    dbg_parser_entry!(i);
+    map(preceded(char('-'), parse_int_named_unambiguous), |e| {
+        IntegerExpression {
+            value: IntegerExpressionValue::Negation(Box::new(e.value)),
+            metadata: None,
+        }
+    })
+    .parse(i)
+    .inspect(|r| dbg_parser_success!(r))
+}
+
+#[function_name::named]
 fn parse_int_named(i: &str) -> IResult<&str, IntegerExpression> {
+    dbg_parser_entry!(i);
+    alt((parse_int_named_ambiguous, parse_int_named_unambiguous))
+        .parse(i)
+        .inspect(|r| dbg_parser_success!(r))
+}
+
+#[function_name::named]
+fn parse_int_named_ambiguous(i: &str) -> IResult<&str, IntegerExpression> {
+    dbg_parser_entry!(i);
+    map(
+        separated_pair(
+            parse_symbol,
+            tag(" or "),
+            separated_list1(tag(" or "), parse_symbol),
+        ),
+        |(f, rs)| IntegerExpression {
+            value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Ambiguous(
+                iter::once(f).chain(rs).map(str::to_owned).collect(),
+            )),
+            metadata: None,
+        },
+    )
+    .parse(i)
+    .inspect(|r| dbg_parser_success!(r))
+}
+
+#[function_name::named]
+fn parse_int_named_unambiguous(i: &str) -> IResult<&str, IntegerExpression> {
     dbg_parser_entry!(i);
     map((parse_symbol, parse_int_metadata), |(e, metadata)| {
         IntegerExpression {
-            value: IntegerExpressionValue::NamedSymbol(e.to_owned()),
+            value: IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(e.to_owned())),
             metadata,
         }
     })
@@ -786,6 +852,14 @@ fn parse_struct_member(i: &str) -> IResult<&str, (&str, Expression)> {
         alt((
             map(parse_in_out_argument, |(ia, oa)| ia.unwrap_or(oa)),
             parse_expression,
+            // Empty flag set
+            value(
+                Expression::Integer(IntegerExpression {
+                    value: IntegerExpressionValue::BinaryOr(vec![]),
+                    metadata: None,
+                }),
+                peek(alt((tag(", "), tag("}")))),
+            ),
         )),
     )
     .parse(i)
@@ -794,6 +868,8 @@ fn parse_struct_member(i: &str) -> IResult<&str, (&str, Expression)> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
 
     #[test]
@@ -812,7 +888,9 @@ mod tests {
                             Some(IntegerExpression {
                                 value: IntegerExpressionValue::Substraction(vec![
                                     IntegerExpressionValue::NamedSymbol(
-                                        "IPV4_DEVCONF_BC_FORWARDING".to_owned()
+                                        NamedSymbol::Unambiguous(
+                                            "IPV4_DEVCONF_BC_FORWARDING".to_owned()
+                                        )
                                     ),
                                     IntegerExpressionValue::Literal(1)
                                 ]),
@@ -827,7 +905,9 @@ mod tests {
                             Some(IntegerExpression {
                                 value: IntegerExpressionValue::Substraction(vec![
                                     IntegerExpressionValue::NamedSymbol(
-                                        "IPV4_DEVCONF_ARP_EVICT_NOCARRIER".to_owned()
+                                        NamedSymbol::Unambiguous(
+                                            "IPV4_DEVCONF_ARP_EVICT_NOCARRIER".to_owned()
+                                        )
                                     ),
                                     IntegerExpressionValue::Literal(1)
                                 ]),
@@ -850,6 +930,23 @@ mod tests {
                         )
                     ]
                 }
+            )
+        );
+    }
+
+    #[test]
+    fn parse_expression_struct_final_empty_member() {
+        assert_eq!(
+            parse_expression("{c_iflag=}").unwrap(),
+            (
+                "",
+                Expression::Struct(HashMap::from([(
+                    "c_iflag".to_owned(),
+                    Expression::Integer(IntegerExpression {
+                        value: IntegerExpressionValue::BinaryOr(vec![]),
+                        metadata: None,
+                    }),
+                )]))
             )
         );
     }

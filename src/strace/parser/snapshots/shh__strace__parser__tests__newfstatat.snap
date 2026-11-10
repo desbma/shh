@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 283
 expression: "parse_line(\"772627      0.000010 newfstatat(AT_FDCWD, \\\"\\\\x2f\\\\x61\\\\x2f\\\\x70\\\\x61\\\\x74\\\\x68\\\", {st_dev=makedev(0xfd, 0x1), st_ino=26427782, st_mode=S_IFDIR|0755, st_nlink=2, st_uid=1000, st_gid=1000, st_blksize=4096, st_blocks=112, st_size=53248, st_atime=1689948680 /* 2023-07-21T16:11:20.028467954+0200 */, st_atime_nsec=28467954, st_mtime=1692975712 /* 2023-08-25T17:01:52.252908565+0200 */, st_mtime_nsec=252908565, st_ctime=1692975712 /* 2023-08-25T17:01:52.252908565+0200 */, st_ctime_nsec=252908565}, 0) = 0\",\n&HashSet::from([\"newfstatat\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -8,7 +9,7 @@ Parsed(Syscall(Syscall(
   name: "newfstatat",
   args: [
     Integer(IntegerExpression(
-      value: NamedSymbol("AT_FDCWD"),
+      value: NamedSymbol(Unambiguous("AT_FDCWD")),
       metadata: None,
     )),
     Buffer(BufferExpression(
@@ -74,7 +75,7 @@ Parsed(Syscall(Syscall(
       )),
       "st_mode": Integer(IntegerExpression(
         value: BinaryOr([
-          NamedSymbol("S_IFDIR"),
+          NamedSymbol(Unambiguous("S_IFDIR")),
           Literal(493),
         ]),
         metadata: None,

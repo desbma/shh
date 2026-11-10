@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 257
 expression: "parse_line(\"440663      0.002174 rt_sigprocmask(SIG_SETMASK, [], ~[KILL STOP RTMIN RT_1], 8) = 0\",\n&HashSet::from([\"rt_sigprocmask\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -8,7 +9,7 @@ Parsed(Syscall(Syscall(
   name: "rt_sigprocmask",
   args: [
     Integer(IntegerExpression(
-      value: NamedSymbol("SIG_SETMASK"),
+      value: NamedSymbol(Unambiguous("SIG_SETMASK")),
       metadata: None,
     )),
     Collection(
@@ -19,19 +20,19 @@ Parsed(Syscall(Syscall(
       complement: true,
       values: [
         (None, Integer(IntegerExpression(
-          value: NamedSymbol("KILL"),
+          value: NamedSymbol(Unambiguous("KILL")),
           metadata: None,
         ))),
         (None, Integer(IntegerExpression(
-          value: NamedSymbol("STOP"),
+          value: NamedSymbol(Unambiguous("STOP")),
           metadata: None,
         ))),
         (None, Integer(IntegerExpression(
-          value: NamedSymbol("RTMIN"),
+          value: NamedSymbol(Unambiguous("RTMIN")),
           metadata: None,
         ))),
         (None, Integer(IntegerExpression(
-          value: NamedSymbol("RT_1"),
+          value: NamedSymbol(Unambiguous("RT_1")),
           metadata: None,
         ))),
       ],

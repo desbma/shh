@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 370
 expression: "parse_line(\"688129      0.000023 bind(4<\\\\x73\\\\x6f\\\\x63\\\\x6b\\\\x65\\\\x74\\\\x3a\\\\x5b\\\\x34\\\\x31\\\\x38\\\\x34\\\\x35\\\\x32\\\\x32\\\\x5d>, {sa_family=AF_UNIX, sun_path=@\\\"\\\\x62\\\\x31\\\\x39\\\\x33\\\\x64\\\\x30\\\\x62\\\\x30\\\\x63\\\\x63\\\\x64\\\\x37\\\\x30\\\\x35\\\\x66\\\\x39\\\\x2f\\\\x62\\\\x75\\\\x73\\\\x2f\\\\x73\\\\x79\\\\x73\\\\x74\\\\x65\\\\x6d\\\\x63\\\\x74\\\\x6c\\\\x2f\\\"}, 34) = 0\",\n&HashSet::from([\"bind\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -30,7 +31,7 @@ Parsed(Syscall(Syscall(
     )),
     Struct({
       "sa_family": Integer(IntegerExpression(
-        value: NamedSymbol("AF_UNIX"),
+        value: NamedSymbol(Unambiguous("AF_UNIX")),
         metadata: None,
       )),
       "sun_path": Buffer(BufferExpression(

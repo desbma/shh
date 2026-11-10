@@ -1,0 +1,275 @@
+---
+source: src/strace/parser/mod.rs
+expression: "parse_line(r#\"1507       0.000033 sendmsg(3<\\x73\\x6f\\x63\\x6b\\x65\\x74\\x3a\\x5b\\x31\\x30\\x36\\x32\\x30\\x35\\x39\\x35\\x5d>, {msg_name={sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, msg_namelen=12, msg_iov=[{iov_base=[{nlmsg_len=72, nlmsg_type=SOCK_DIAG_BY_FAMILY, nlmsg_flags=NLM_F_REQUEST|NLM_F_DUMP, nlmsg_seq=123456, nlmsg_pid=0}, {sdiag_family=AF_INET, sdiag_protocol=IPPROTO_TCP, idiag_ext=1<<(INET_DIAG_INFO-1)|1<<(INET_DIAG_VEGASINFO-1)|1<<(INET_DIAG_CONG-1), idiag_states=1<<TCP_ESTABLISHED|1<<TCP_SYN_SENT|1<<TCP_FIN_WAIT1|1<<TCP_FIN_WAIT2|1<<TCP_CLOSE_WAIT|1<<TCP_LAST_ACK|1<<TCP_CLOSING|1<<TCP_NEW_SYN_RECV|1<<TCP_BOUND_INACTIVE|0x1, id={idiag_sport=htons(0), idiag_dport=htons(0), idiag_src=inet_addr(\"\\x30\\x2e\\x30\\x2e\\x30\\x2e\\x30\"), idiag_dst=inet_addr(\"\\x30\\x2e\\x30\\x2e\\x30\\x2e\\x30\"), idiag_if=0, idiag_cookie=[0, 0]}}], iov_len=72}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 72\"#,\n&HashSet::from([\"sendmsg\"]),).unwrap()"
+---
+Parsed(Syscall(Syscall(
+  pid: 1507,
+  rel_ts: 3.3e-5,
+  name: "sendmsg",
+  args: [
+    Integer(IntegerExpression(
+      value: Literal(3),
+      metadata: Some([
+        115,
+        111,
+        99,
+        107,
+        101,
+        116,
+        58,
+        91,
+        49,
+        48,
+        54,
+        50,
+        48,
+        53,
+        57,
+        53,
+        93,
+      ]),
+    )),
+    Struct({
+      "msg_controllen": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "msg_flags": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "msg_iov": Collection(
+        complement: false,
+        values: [
+          (None, Struct({
+            "iov_base": Collection(
+              complement: false,
+              values: [
+                (None, Struct({
+                  "nlmsg_flags": Integer(IntegerExpression(
+                    value: BinaryOr([
+                      NamedSymbol(Unambiguous("NLM_F_REQUEST")),
+                      NamedSymbol(Unambiguous("NLM_F_DUMP")),
+                    ]),
+                    metadata: None,
+                  )),
+                  "nlmsg_len": Integer(IntegerExpression(
+                    value: Literal(72),
+                    metadata: None,
+                  )),
+                  "nlmsg_pid": Integer(IntegerExpression(
+                    value: Literal(0),
+                    metadata: None,
+                  )),
+                  "nlmsg_seq": Integer(IntegerExpression(
+                    value: Literal(123456),
+                    metadata: None,
+                  )),
+                  "nlmsg_type": Integer(IntegerExpression(
+                    value: NamedSymbol(Unambiguous("SOCK_DIAG_BY_FAMILY")),
+                    metadata: None,
+                  )),
+                })),
+                (None, Struct({
+                  "id": Struct({
+                    "idiag_cookie": Collection(
+                      complement: false,
+                      values: [
+                        (None, Integer(IntegerExpression(
+                          value: Literal(0),
+                          metadata: None,
+                        ))),
+                        (None, Integer(IntegerExpression(
+                          value: Literal(0),
+                          metadata: None,
+                        ))),
+                      ],
+                    ),
+                    "idiag_dport": Integer(IntegerExpression(
+                      value: Macro(
+                        name: "htons",
+                        args: [
+                          Integer(IntegerExpression(
+                            value: Literal(0),
+                            metadata: None,
+                          )),
+                        ],
+                      ),
+                      metadata: None,
+                    )),
+                    "idiag_dst": Integer(IntegerExpression(
+                      value: Macro(
+                        name: "inet_addr",
+                        args: [
+                          Buffer(BufferExpression(
+                            value: [
+                              48,
+                              46,
+                              48,
+                              46,
+                              48,
+                              46,
+                              48,
+                            ],
+                            type_: Unknown,
+                          )),
+                        ],
+                      ),
+                      metadata: None,
+                    )),
+                    "idiag_if": Integer(IntegerExpression(
+                      value: Literal(0),
+                      metadata: None,
+                    )),
+                    "idiag_sport": Integer(IntegerExpression(
+                      value: Macro(
+                        name: "htons",
+                        args: [
+                          Integer(IntegerExpression(
+                            value: Literal(0),
+                            metadata: None,
+                          )),
+                        ],
+                      ),
+                      metadata: None,
+                    )),
+                    "idiag_src": Integer(IntegerExpression(
+                      value: Macro(
+                        name: "inet_addr",
+                        args: [
+                          Buffer(BufferExpression(
+                            value: [
+                              48,
+                              46,
+                              48,
+                              46,
+                              48,
+                              46,
+                              48,
+                            ],
+                            type_: Unknown,
+                          )),
+                        ],
+                      ),
+                      metadata: None,
+                    )),
+                  }),
+                  "idiag_ext": Integer(IntegerExpression(
+                    value: BinaryOr([
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: Substraction([
+                          NamedSymbol(Unambiguous("INET_DIAG_INFO")),
+                          Literal(1),
+                        ]),
+                      ),
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: Substraction([
+                          NamedSymbol(Unambiguous("INET_DIAG_VEGASINFO")),
+                          Literal(1),
+                        ]),
+                      ),
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: Substraction([
+                          NamedSymbol(Unambiguous("INET_DIAG_CONG")),
+                          Literal(1),
+                        ]),
+                      ),
+                    ]),
+                    metadata: None,
+                  )),
+                  "idiag_states": Integer(IntegerExpression(
+                    value: BinaryOr([
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: NamedSymbol(Unambiguous("TCP_ESTABLISHED")),
+                      ),
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: NamedSymbol(Unambiguous("TCP_SYN_SENT")),
+                      ),
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: NamedSymbol(Unambiguous("TCP_FIN_WAIT1")),
+                      ),
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: NamedSymbol(Unambiguous("TCP_FIN_WAIT2")),
+                      ),
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: NamedSymbol(Unambiguous("TCP_CLOSE_WAIT")),
+                      ),
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: NamedSymbol(Unambiguous("TCP_LAST_ACK")),
+                      ),
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: NamedSymbol(Unambiguous("TCP_CLOSING")),
+                      ),
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: NamedSymbol(Unambiguous("TCP_NEW_SYN_RECV")),
+                      ),
+                      LeftBitShift(
+                        bits: Literal(1),
+                        shift: NamedSymbol(Unambiguous("TCP_BOUND_INACTIVE")),
+                      ),
+                      Literal(1),
+                    ]),
+                    metadata: None,
+                  )),
+                  "sdiag_family": Integer(IntegerExpression(
+                    value: NamedSymbol(Unambiguous("AF_INET")),
+                    metadata: None,
+                  )),
+                  "sdiag_protocol": Integer(IntegerExpression(
+                    value: NamedSymbol(Unambiguous("IPPROTO_TCP")),
+                    metadata: None,
+                  )),
+                })),
+              ],
+            ),
+            "iov_len": Integer(IntegerExpression(
+              value: Literal(72),
+              metadata: None,
+            )),
+          })),
+        ],
+      ),
+      "msg_iovlen": Integer(IntegerExpression(
+        value: Literal(1),
+        metadata: None,
+      )),
+      "msg_name": Struct({
+        "nl_groups": Integer(IntegerExpression(
+          value: Literal(0),
+          metadata: None,
+        )),
+        "nl_pid": Integer(IntegerExpression(
+          value: Literal(0),
+          metadata: None,
+        )),
+        "sa_family": Integer(IntegerExpression(
+          value: NamedSymbol(Unambiguous("AF_NETLINK")),
+          metadata: None,
+        )),
+      }),
+      "msg_namelen": Integer(IntegerExpression(
+        value: Literal(12),
+        metadata: None,
+      )),
+    }),
+    Integer(IntegerExpression(
+      value: Literal(0),
+      metadata: None,
+    )),
+  ],
+  ret_val: Some(IntegerExpression(
+    value: Literal(72),
+    metadata: None,
+  )),
+)))

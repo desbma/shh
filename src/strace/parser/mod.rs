@@ -781,6 +781,77 @@ mod tests {
             .unwrap()
         );
     }
+    #[test]
+    fn empty_flag_set() {
+        let _ = simple_logger::SimpleLogger::new().init();
+        assert_snapshot!(
+            parse_line(
+                r"1284       0.000033 ioctl(23<\x2f\x64\x65\x76\x2f\x70\x74\x73\x2f\x30>, TCSETS2, {c_iflag=, c_oflag=NL0|CR0|TAB0|BS0|VT0|FF0|OPOST|ONLCR, c_cflag=B38400|CS8|CREAD, c_lflag=ECHOE|ECHOK|ECHOCTL|ECHOKE, c_line=N_TTY, c_cc=[[VINTR]=0x3, [VQUIT]=0x1c, [VERASE]=0x7f, [VKILL]=0x15, [VEOF]=0x4, [VTIME]=0, [VMIN]=0x1, [VSWTC]=0, [VSTART]=0x11, [VSTOP]=0x13, [VSUSP]=0x1a, [VEOL]=0, [VREPRINT]=0x12, [VDISCARD]=0xf, [VWERASE]=0x17, [VLNEXT]=0x16, [VEOL2]=0, [17]=0, [18]=0], c_ispeed=38400, c_ospeed=38400}) = 0",
+                &HashSet::from(["ioctl"]),
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn flag_set_trailing_or() {
+        let _ = simple_logger::SimpleLogger::new().init();
+        assert_snapshot!(
+            parse_line(
+                r"965        0.000027 ioctl(0<\x2f\x64\x65\x76\x2f\x70\x74\x73\x2f\x30>, TCSETS2, {c_iflag=, c_oflag=NL0|CR0|TAB0|BS0|VT0|FF0|, c_cflag=B38400|CS8|CREAD, c_lflag=ECHOE|ECHOK|ECHOCTL|ECHOKE, c_line=N_TTY, c_cc=[[VINTR]=0x3, [VQUIT]=0x1c, [VERASE]=0x7f, [VKILL]=0x15, [VEOF]=0x4, [VTIME]=0, [VMIN]=0x1, [VSWTC]=0, [VSTART]=0x11, [VSTOP]=0x13, [VSUSP]=0x1a, [VEOL]=0, [VREPRINT]=0x12, [VDISCARD]=0xf, [VWERASE]=0x17, [VLNEXT]=0x16, [VEOL2]=0, [17]=0, [18]=0], c_ispeed=38400, c_ospeed=38400}) = 0",
+                &HashSet::from(["ioctl"]),
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn ambiguous_named_symbol() {
+        let _ = simple_logger::SimpleLogger::new().init();
+        assert_snapshot!(
+            parse_line(
+                r"105350      0.000049 ioctl(4<\x2f\x74\x6d\x70\x2f\x2e\x74\x6d\x70\x6e\x38\x48\x35\x53\x37\x2e\x64\x73\x74>, BTRFS_IOC_CLONE or FICLONE, 3) = -1 EOPNOTSUPP (Operation not supported)",
+                &HashSet::from(["ioctl"]),
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn negated_symbol() {
+        let _ = simple_logger::SimpleLogger::new().init();
+        assert_snapshot!(
+            parse_line(
+                r#"2358       0.000037 recvfrom(5<\x73\x6f\x63\x6b\x65\x74\x3a\x5b\x31\x30\x36\x32\x30\x38\x37\x36\x5d>, [{nlmsg_len=48, nlmsg_type=NLMSG_ERROR, nlmsg_flags=0, nlmsg_seq=2, nlmsg_pid=-410299790}, {error=-EPERM, msg=[{nlmsg_len=28, nlmsg_type=TASKSTATS, nlmsg_flags=NLM_F_REQUEST, nlmsg_seq=2, nlmsg_pid=-410299790}, {cmd=0x1, version=0}, [{nla_len=8, nla_type=0x1}, "\x01\x00\x00\x00"]]}], 16384, 0, {sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, [12]) = 48"#,
+                &HashSet::from(["recvfrom"]),
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn parenthesized_operand() {
+        let _ = simple_logger::SimpleLogger::new().init();
+        assert_snapshot!(
+            parse_line(
+                r#"1507       0.000033 sendmsg(3<\x73\x6f\x63\x6b\x65\x74\x3a\x5b\x31\x30\x36\x32\x30\x35\x39\x35\x5d>, {msg_name={sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, msg_namelen=12, msg_iov=[{iov_base=[{nlmsg_len=72, nlmsg_type=SOCK_DIAG_BY_FAMILY, nlmsg_flags=NLM_F_REQUEST|NLM_F_DUMP, nlmsg_seq=123456, nlmsg_pid=0}, {sdiag_family=AF_INET, sdiag_protocol=IPPROTO_TCP, idiag_ext=1<<(INET_DIAG_INFO-1)|1<<(INET_DIAG_VEGASINFO-1)|1<<(INET_DIAG_CONG-1), idiag_states=1<<TCP_ESTABLISHED|1<<TCP_SYN_SENT|1<<TCP_FIN_WAIT1|1<<TCP_FIN_WAIT2|1<<TCP_CLOSE_WAIT|1<<TCP_LAST_ACK|1<<TCP_CLOSING|1<<TCP_NEW_SYN_RECV|1<<TCP_BOUND_INACTIVE|0x1, id={idiag_sport=htons(0), idiag_dport=htons(0), idiag_src=inet_addr("\x30\x2e\x30\x2e\x30\x2e\x30"), idiag_dst=inet_addr("\x30\x2e\x30\x2e\x30\x2e\x30"), idiag_if=0, idiag_cookie=[0, 0]}}], iov_len=72}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 72"#,
+                &HashSet::from(["sendmsg"]),
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn or_starting_with_shift() {
+        let _ = simple_logger::SimpleLogger::new().init();
+        assert_snapshot!(
+            parse_line(
+                r"1731       0.000044 sendto(3<\x73\x6f\x63\x6b\x65\x74\x3a\x5b\x31\x30\x35\x39\x31\x34\x34\x33\x5d>, [{nlmsg_len=20, nlmsg_type=NFNL_SUBSYS_NFTABLES<<8|NFT_MSG_GETGEN, nlmsg_flags=NLM_F_REQUEST, nlmsg_seq=0, nlmsg_pid=0}, {nfgen_family=AF_UNSPEC, version=NFNETLINK_V0, res_id=htons(0)}], 20, 0, {sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, 12) = 20",
+                &HashSet::from(["sendto"]),
+            )
+            .unwrap()
+        );
+    }
 }
 
 #[cfg(all(feature = "nightly", test))]

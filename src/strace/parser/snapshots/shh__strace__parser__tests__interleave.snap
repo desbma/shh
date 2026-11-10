@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 437
 expression: syscalls
 ---
 [
@@ -9,7 +10,7 @@ expression: syscalls
     name: "clock_gettime",
     args: [
       Integer(IntegerExpression(
-        value: NamedSymbol("CLOCK_REALTIME"),
+        value: NamedSymbol(Unambiguous("CLOCK_REALTIME")),
         metadata: None,
       )),
       Struct({
@@ -47,15 +48,15 @@ expression: syscalls
         ],
       ),
       Integer(IntegerExpression(
-        value: NamedSymbol("NULL"),
+        value: NamedSymbol(Unambiguous("NULL")),
         metadata: None,
       )),
       Integer(IntegerExpression(
-        value: NamedSymbol("NULL"),
+        value: NamedSymbol(Unambiguous("NULL")),
         metadata: None,
       )),
       Integer(IntegerExpression(
-        value: NamedSymbol("NULL"),
+        value: NamedSymbol(Unambiguous("NULL")),
         metadata: None,
       )),
     ],

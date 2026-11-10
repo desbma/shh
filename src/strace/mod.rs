@@ -162,14 +162,27 @@ pub(crate) enum IntegerExpressionValue {
         args: Vec<Expression>,
     },
     Multiplication(Vec<IntegerExpressionValue>),
-    NamedSymbol(String),
+    NamedSymbol(NamedSymbol),
+    Negation(Box<IntegerExpressionValue>),
     Substraction(Vec<IntegerExpressionValue>),
+}
+
+/// Symbolic constant name
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(test, derive(serde::Serialize))]
+pub(crate) enum NamedSymbol {
+    Unambiguous(String),
+    /// Candidate names for a value several constants share
+    Ambiguous(Vec<String>),
 }
 
 impl IntegerExpressionValue {
     pub(crate) fn is_flag_set(&self, flag: &str) -> bool {
         match self {
-            IntegerExpressionValue::NamedSymbol(v) => flag == v,
+            IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(v)) => flag == v,
+            IntegerExpressionValue::NamedSymbol(NamedSymbol::Ambiguous(vs)) => {
+                vs.iter().any(|v| flag == v)
+            }
             IntegerExpressionValue::BinaryOr(ces) => ces.iter().any(|ce| ce.is_flag_set(flag)),
             _ => false, // if it was a flag field, strace would have decoded it with named consts
         }
@@ -177,7 +190,8 @@ impl IntegerExpressionValue {
 
     pub(crate) fn flags(&self) -> Vec<String> {
         match self {
-            IntegerExpressionValue::NamedSymbol(v) => vec![v.clone()],
+            IntegerExpressionValue::NamedSymbol(NamedSymbol::Unambiguous(v)) => vec![v.clone()],
+            IntegerExpressionValue::NamedSymbol(NamedSymbol::Ambiguous(vs)) => vs.clone(),
             IntegerExpressionValue::BinaryOr(vs) => {
                 vs.iter().flat_map(IntegerExpressionValue::flags).collect()
             }
@@ -210,6 +224,7 @@ impl IntegerExpressionValue {
             }
             IntegerExpressionValue::Literal(v) => Some(*v),
             IntegerExpressionValue::NamedSymbol(_) | IntegerExpressionValue::Macro { .. } => None,
+            IntegerExpressionValue::Negation(v) => Some(-v.value()?),
             IntegerExpressionValue::Multiplication(values) => values
                 .iter()
                 .map(Self::value)
@@ -265,6 +280,23 @@ impl StraceVersion {
 impl fmt::Display for StraceVersion {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}.{}", self.major, self.minor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ambiguous_named_symbol_flags() {
+        let value = IntegerExpressionValue::NamedSymbol(NamedSymbol::Ambiguous(vec![
+            "BTRFS_IOC_CLONE".to_owned(),
+            "FICLONE".to_owned(),
+        ]));
+        assert!(value.is_flag_set("BTRFS_IOC_CLONE"));
+        assert!(value.is_flag_set("FICLONE"));
+        assert!(!value.is_flag_set("FIOCLEX"));
+        assert_eq!(value.flags(), vec!["BTRFS_IOC_CLONE", "FICLONE"]);
     }
 }
 

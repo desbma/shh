@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 401
 expression: "parse_line(\"114586      0.000075 epoll_ctl(3<\\\\x61\\\\x6e\\\\x6f\\\\x6e\\\\x5f\\\\x69\\\\x6e\\\\x6f\\\\x64\\\\x65\\\\x3a\\\\x5b\\\\x65\\\\x76\\\\x65\\\\x6e\\\\x74\\\\x70\\\\x6f\\\\x6c\\\\x6c\\\\x5d>, EPOLL_CTL_ADD, 4<\\\\x73\\\\x6f\\\\x63\\\\x6b\\\\x65\\\\x74\\\\x3a\\\\x5b\\\\x37\\\\x33\\\\x31\\\\x35\\\\x39\\\\x38\\\\x5d>, {events=EPOLLIN, data={u32=4, u64=4}}) = 0\",\n&HashSet::from([\"epoll_ctl\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -35,7 +36,7 @@ Parsed(Syscall(Syscall(
       ]),
     )),
     Integer(IntegerExpression(
-      value: NamedSymbol("EPOLL_CTL_ADD"),
+      value: NamedSymbol(Unambiguous("EPOLL_CTL_ADD")),
       metadata: None,
     )),
     Integer(IntegerExpression(
@@ -70,7 +71,7 @@ Parsed(Syscall(Syscall(
         )),
       }),
       "events": Integer(IntegerExpression(
-        value: NamedSymbol("EPOLLIN"),
+        value: NamedSymbol(Unambiguous("EPOLLIN")),
         metadata: None,
       )),
     }),

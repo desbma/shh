@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 307
 expression: "parse_line(\"244841      0.000033 fstatfs(6, {f_type=EXT2_SUPER_MAGIC, f_bsize=4096, f_blocks=231830864, f_bfree=38594207, f_bavail=26799417, f_files=58957824, f_ffree=54942232, f_fsid={val=[0x511787a8, 0x92a74a52]}, f_namelen=255, f_frsize=4096, f_flags=ST_VALID|ST_NOATIME}) = 0\",\n&HashSet::from([\"fstatfs\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -38,8 +39,8 @@ Parsed(Syscall(Syscall(
       )),
       "f_flags": Integer(IntegerExpression(
         value: BinaryOr([
-          NamedSymbol("ST_VALID"),
-          NamedSymbol("ST_NOATIME"),
+          NamedSymbol(Unambiguous("ST_VALID")),
+          NamedSymbol(Unambiguous("ST_NOATIME")),
         ]),
         metadata: None,
       )),
@@ -67,7 +68,7 @@ Parsed(Syscall(Syscall(
         metadata: None,
       )),
       "f_type": Integer(IntegerExpression(
-        value: NamedSymbol("EXT2_SUPER_MAGIC"),
+        value: NamedSymbol(Unambiguous("EXT2_SUPER_MAGIC")),
         metadata: None,
       )),
     }),

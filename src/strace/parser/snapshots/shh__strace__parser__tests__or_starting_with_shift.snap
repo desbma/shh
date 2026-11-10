@@ -1,0 +1,118 @@
+---
+source: src/strace/parser/mod.rs
+expression: "parse_line(r\"1731       0.000044 sendto(3<\\x73\\x6f\\x63\\x6b\\x65\\x74\\x3a\\x5b\\x31\\x30\\x35\\x39\\x31\\x34\\x34\\x33\\x5d>, [{nlmsg_len=20, nlmsg_type=NFNL_SUBSYS_NFTABLES<<8|NFT_MSG_GETGEN, nlmsg_flags=NLM_F_REQUEST, nlmsg_seq=0, nlmsg_pid=0}, {nfgen_family=AF_UNSPEC, version=NFNETLINK_V0, res_id=htons(0)}], 20, 0, {sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, 12) = 20\",\n&HashSet::from([\"sendto\"]),).unwrap()"
+---
+Parsed(Syscall(Syscall(
+  pid: 1731,
+  rel_ts: 4.4e-5,
+  name: "sendto",
+  args: [
+    Integer(IntegerExpression(
+      value: Literal(3),
+      metadata: Some([
+        115,
+        111,
+        99,
+        107,
+        101,
+        116,
+        58,
+        91,
+        49,
+        48,
+        53,
+        57,
+        49,
+        52,
+        52,
+        51,
+        93,
+      ]),
+    )),
+    Collection(
+      complement: false,
+      values: [
+        (None, Struct({
+          "nlmsg_flags": Integer(IntegerExpression(
+            value: NamedSymbol(Unambiguous("NLM_F_REQUEST")),
+            metadata: None,
+          )),
+          "nlmsg_len": Integer(IntegerExpression(
+            value: Literal(20),
+            metadata: None,
+          )),
+          "nlmsg_pid": Integer(IntegerExpression(
+            value: Literal(0),
+            metadata: None,
+          )),
+          "nlmsg_seq": Integer(IntegerExpression(
+            value: Literal(0),
+            metadata: None,
+          )),
+          "nlmsg_type": Integer(IntegerExpression(
+            value: BinaryOr([
+              LeftBitShift(
+                bits: NamedSymbol(Unambiguous("NFNL_SUBSYS_NFTABLES")),
+                shift: Literal(8),
+              ),
+              NamedSymbol(Unambiguous("NFT_MSG_GETGEN")),
+            ]),
+            metadata: None,
+          )),
+        })),
+        (None, Struct({
+          "nfgen_family": Integer(IntegerExpression(
+            value: NamedSymbol(Unambiguous("AF_UNSPEC")),
+            metadata: None,
+          )),
+          "res_id": Integer(IntegerExpression(
+            value: Macro(
+              name: "htons",
+              args: [
+                Integer(IntegerExpression(
+                  value: Literal(0),
+                  metadata: None,
+                )),
+              ],
+            ),
+            metadata: None,
+          )),
+          "version": Integer(IntegerExpression(
+            value: NamedSymbol(Unambiguous("NFNETLINK_V0")),
+            metadata: None,
+          )),
+        })),
+      ],
+    ),
+    Integer(IntegerExpression(
+      value: Literal(20),
+      metadata: None,
+    )),
+    Integer(IntegerExpression(
+      value: Literal(0),
+      metadata: None,
+    )),
+    Struct({
+      "nl_groups": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "nl_pid": Integer(IntegerExpression(
+        value: Literal(0),
+        metadata: None,
+      )),
+      "sa_family": Integer(IntegerExpression(
+        value: NamedSymbol(Unambiguous("AF_NETLINK")),
+        metadata: None,
+      )),
+    }),
+    Integer(IntegerExpression(
+      value: Literal(12),
+      metadata: None,
+    )),
+  ],
+  ret_val: Some(IntegerExpression(
+    value: Literal(20),
+    metadata: None,
+  )),
+)))

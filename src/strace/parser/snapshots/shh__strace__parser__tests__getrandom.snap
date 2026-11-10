@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 295
 expression: "parse_line(\"815537      0.000017 getrandom(\\\"\\\\x42\\\\x18\\\\x81\\\\x90\\\\x40\\\\x63\\\\x1a\\\\x2c\\\", 8, GRND_NONBLOCK) = 8\",\n&HashSet::from([\"getrandom\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -25,7 +26,7 @@ Parsed(Syscall(Syscall(
       metadata: None,
     )),
     Integer(IntegerExpression(
-      value: NamedSymbol("GRND_NONBLOCK"),
+      value: NamedSymbol(Unambiguous("GRND_NONBLOCK")),
       metadata: None,
     )),
   ],

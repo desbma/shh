@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 684
 expression: "parse_line(\"664767      0.000014 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f3b7c000990, parent_tid=0x7f3b7c000990, exit_signal=0, stack=0x7f3b7b800000, stack_size=0x7ff880, tls=0x7f3b7c0006c0} => {parent_tid=[664773]}, 88) = 664773\",\n&HashSet::from([\"clone3\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -18,15 +19,15 @@ Parsed(Syscall(Syscall(
       )),
       "flags": Integer(IntegerExpression(
         value: BinaryOr([
-          NamedSymbol("CLONE_VM"),
-          NamedSymbol("CLONE_FS"),
-          NamedSymbol("CLONE_FILES"),
-          NamedSymbol("CLONE_SIGHAND"),
-          NamedSymbol("CLONE_THREAD"),
-          NamedSymbol("CLONE_SYSVSEM"),
-          NamedSymbol("CLONE_SETTLS"),
-          NamedSymbol("CLONE_PARENT_SETTID"),
-          NamedSymbol("CLONE_CHILD_CLEARTID"),
+          NamedSymbol(Unambiguous("CLONE_VM")),
+          NamedSymbol(Unambiguous("CLONE_FS")),
+          NamedSymbol(Unambiguous("CLONE_FILES")),
+          NamedSymbol(Unambiguous("CLONE_SIGHAND")),
+          NamedSymbol(Unambiguous("CLONE_THREAD")),
+          NamedSymbol(Unambiguous("CLONE_SYSVSEM")),
+          NamedSymbol(Unambiguous("CLONE_SETTLS")),
+          NamedSymbol(Unambiguous("CLONE_PARENT_SETTID")),
+          NamedSymbol(Unambiguous("CLONE_CHILD_CLEARTID")),
         ]),
         metadata: None,
       )),

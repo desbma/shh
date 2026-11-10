@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 740
 expression: "parse_line(\"813299      0.000023 connect(93, {sa_family=AF_INET6, sin6_port=htons(0), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, \\\"\\\\x12\\\\x34\\\", &sin6_addr), sin6_scope_id=0}, 28) = 0\",\n&HashSet::from([\"connect\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -13,7 +14,7 @@ Parsed(Syscall(Syscall(
     )),
     Struct({
       "sa_family": Integer(IntegerExpression(
-        value: NamedSymbol("AF_INET6"),
+        value: NamedSymbol(Unambiguous("AF_INET6")),
         metadata: None,
       )),
       "sin6_addr": Integer(IntegerExpression(
@@ -21,7 +22,7 @@ Parsed(Syscall(Syscall(
           name: "inet_pton",
           args: [
             Integer(IntegerExpression(
-              value: NamedSymbol("AF_INET6"),
+              value: NamedSymbol(Unambiguous("AF_INET6")),
               metadata: None,
             )),
             Buffer(BufferExpression(

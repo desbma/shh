@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 727
 expression: "parse_line(\"794046      0.000024 capset({version=_LINUX_CAPABILITY_VERSION_3, pid=0}, {effective=1<<CAP_SYS_CHROOT, permitted=1<<CAP_SYS_CHROOT, inheritable=0}) = 0\",\n&HashSet::from([\"capset\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -13,7 +14,7 @@ Parsed(Syscall(Syscall(
         metadata: None,
       )),
       "version": Integer(IntegerExpression(
-        value: NamedSymbol("_LINUX_CAPABILITY_VERSION_3"),
+        value: NamedSymbol(Unambiguous("_LINUX_CAPABILITY_VERSION_3")),
         metadata: None,
       )),
     }),
@@ -21,7 +22,7 @@ Parsed(Syscall(Syscall(
       "effective": Integer(IntegerExpression(
         value: LeftBitShift(
           bits: Literal(1),
-          shift: NamedSymbol("CAP_SYS_CHROOT"),
+          shift: NamedSymbol(Unambiguous("CAP_SYS_CHROOT")),
         ),
         metadata: None,
       )),
@@ -32,7 +33,7 @@ Parsed(Syscall(Syscall(
       "permitted": Integer(IntegerExpression(
         value: LeftBitShift(
           bits: Literal(1),
-          shift: NamedSymbol("CAP_SYS_CHROOT"),
+          shift: NamedSymbol(Unambiguous("CAP_SYS_CHROOT")),
         ),
         metadata: None,
       )),

@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 466
 expression: result
 ---
 Parsed(Syscall(Syscall(
@@ -8,7 +9,7 @@ Parsed(Syscall(Syscall(
   name: "openat",
   args: [
     Integer(IntegerExpression(
-      value: NamedSymbol("AT_FDCWD"),
+      value: NamedSymbol(Unambiguous("AT_FDCWD")),
       metadata: None,
     )),
     Buffer(BufferExpression(
@@ -19,7 +20,7 @@ Parsed(Syscall(Syscall(
       type_: Unknown,
     )),
     Integer(IntegerExpression(
-      value: NamedSymbol("O_RDONLY"),
+      value: NamedSymbol(Unambiguous("O_RDONLY")),
       metadata: None,
     )),
   ],

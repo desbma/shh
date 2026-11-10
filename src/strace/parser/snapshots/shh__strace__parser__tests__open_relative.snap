@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 326
 expression: "parse_line(\"998518      0.000033 openat(AT_FDCWD<\\\\x2f\\\\x68\\\\x6f\\\\x6d\\\\x65\\\\x2f\\\\x6d\\\\x64\\\\x65\\\\x2f\\\\x73\\\\x72\\\\x63\\\\x2f\\\\x73\\\\x68\\\\x68>, \\\"\\\\x2e\\\\x2e\\\", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3<\\\\x2f\\\\x68\\\\x6f\\\\x6d\\\\x65\\\\x2f\\\\x6d\\\\x64\\\\x65\\\\x2f\\\\x73\\\\x72\\\\x63>\",\n&HashSet::from([\"openat\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -8,7 +9,7 @@ Parsed(Syscall(Syscall(
   name: "openat",
   args: [
     Integer(IntegerExpression(
-      value: NamedSymbol("AT_FDCWD"),
+      value: NamedSymbol(Unambiguous("AT_FDCWD")),
       metadata: Some([
         47,
         104,
@@ -38,10 +39,10 @@ Parsed(Syscall(Syscall(
     )),
     Integer(IntegerExpression(
       value: BinaryOr([
-        NamedSymbol("O_RDONLY"),
-        NamedSymbol("O_NONBLOCK"),
-        NamedSymbol("O_CLOEXEC"),
-        NamedSymbol("O_DIRECTORY"),
+        NamedSymbol(Unambiguous("O_RDONLY")),
+        NamedSymbol(Unambiguous("O_NONBLOCK")),
+        NamedSymbol(Unambiguous("O_CLOEXEC")),
+        NamedSymbol(Unambiguous("O_DIRECTORY")),
       ]),
       metadata: None,
     )),

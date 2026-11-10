@@ -1,5 +1,6 @@
 ---
 source: src/strace/parser/mod.rs
+assertion_line: 233
 expression: "parse_line(\"382944      0.000036 access(\\\"\\\\x2f\\\\x65\\\\x74\\\\x63\\\\x2f\\\\x6c\\\\x64\\\\x2e\\\\x73\\\\x6f\\\\x2e\\\\x70\\\\x72\\\\x65\\\\x6c\\\\x6f\\\\x61\\\\x64\\\", R_OK) = -1 ENOENT (No such file or directory)\",\n&HashSet::from([\"access\"]),).unwrap()"
 ---
 Parsed(Syscall(Syscall(
@@ -31,7 +32,7 @@ Parsed(Syscall(Syscall(
       type_: Unknown,
     )),
     Integer(IntegerExpression(
-      value: NamedSymbol("R_OK"),
+      value: NamedSymbol(Unambiguous("R_OK")),
       metadata: None,
     )),
   ],
