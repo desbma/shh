@@ -49,12 +49,12 @@ impl OptionSpec for ProtectSystem {
         .iter()
         .map(|p| OptionValueEffect::DenyWrite(PathDescription::base(p)))
         .collect();
+        protect_system_yes_nowrite.push(OptionValueEffect::DenyAction(
+            DeniableAction::HostMountNamespace,
+        ));
         let mut protect_system_full_nowrite = protect_system_yes_nowrite.clone();
         protect_system_full_nowrite
             .push(OptionValueEffect::DenyWrite(PathDescription::base("/etc/")));
-        protect_system_yes_nowrite.push(OptionValueEffect::DenyAction(DeniableAction::MountToHost));
-        protect_system_full_nowrite
-            .push(OptionValueEffect::DenyAction(DeniableAction::MountToHost));
         OptionDescription {
             name: "ProtectSystem",
             possible_values: vec![
@@ -77,7 +77,7 @@ impl OptionSpec for ProtectSystem {
                             base: "/".into(),
                             exceptions: vec!["/dev/".into(), "/proc/".into(), "/sys/".into()],
                         }),
-                        OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                        OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
                     ])),
                 },
             ],
@@ -106,7 +106,7 @@ impl OptionSpec for ProtectHome {
                             .iter()
                             .map(|p| OptionValueEffect::EmptyPath(EmptyPathDescription::base(p)))
                             .chain(iter::once(OptionValueEffect::DenyAction(
-                                DeniableAction::MountToHost,
+                                DeniableAction::HostMountNamespace,
                             )))
                             .collect(),
                     )),
@@ -118,7 +118,7 @@ impl OptionSpec for ProtectHome {
                             .iter()
                             .map(|p| OptionValueEffect::EmptyPath(EmptyPathDescription::base_ro(p)))
                             .chain(iter::once(OptionValueEffect::DenyAction(
-                                DeniableAction::MountToHost,
+                                DeniableAction::HostMountNamespace,
                             )))
                             .collect(),
                     )),
@@ -130,7 +130,7 @@ impl OptionSpec for ProtectHome {
                             .iter()
                             .map(|p| OptionValueEffect::RemovePath(PathDescription::base(p)))
                             .chain(iter::once(OptionValueEffect::DenyAction(
-                                DeniableAction::MountToHost,
+                                DeniableAction::HostMountNamespace,
                             )))
                             .collect(),
                     )),
@@ -161,7 +161,7 @@ impl OptionSpec for PrivateTmp {
                 desc: OptionEffect::Simple(OptionValueEffect::Multiple(vec![
                     OptionValueEffect::EmptyPath(EmptyPathDescription::base("/tmp")),
                     OptionValueEffect::EmptyPath(EmptyPathDescription::base("/var/tmp")),
-                    OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                    OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
                 ])),
             }],
             updater: None,
@@ -209,7 +209,7 @@ impl OptionSpec for PrivateDevices {
                     OptionValueEffect::DenySyscalls(DenySyscalls::Class("raw-io")),
                     OptionValueEffect::DenyAction(DeniableAction::MknodSpecial),
                     OptionValueEffect::DenyExec(PathDescription::base("/dev")),
-                    OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                    OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
                 ])),
             }],
             updater: None,
@@ -231,7 +231,7 @@ impl OptionSpec for PrivateMounts {
             possible_values: vec![OptionValueDescription {
                 value: OptionValue::Boolean(true),
                 desc: OptionEffect::Simple(OptionValueEffect::DenyAction(
-                    DeniableAction::MountToHost,
+                    DeniableAction::HostMountNamespace,
                 )),
             }],
             updater: None,
@@ -286,7 +286,7 @@ impl OptionSpec for ProtectKernelTunables {
                         iter::once(OptionValueEffect::DenyWrite(PathDescription::base("/sys"))),
                     )
                     .chain(iter::once(OptionValueEffect::DenyAction(
-                        DeniableAction::MountToHost,
+                        DeniableAction::HostMountNamespace,
                     )))
                     .collect(),
                 )),
@@ -314,7 +314,7 @@ impl OptionSpec for ProtectKernelModules {
                     OptionValueEffect::RemovePath(PathDescription::base("/lib/modules/")),
                     OptionValueEffect::RemovePath(PathDescription::base("/usr/lib/modules/")),
                     OptionValueEffect::DenySyscalls(DenySyscalls::Class("module")),
-                    OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                    OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
                 ])),
             }],
             updater: None,
@@ -341,7 +341,7 @@ impl OptionSpec for ProtectKernelLogs {
                     OptionValueEffect::RemovePath(PathDescription::base("/dev/kmsg")),
                     OptionValueEffect::DenySyscalls(DenySyscalls::Single("syslog")),
                     // TODO figure out about this one, systemd doc says it doesn't but tests seem to say otherwise?
-                    OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                    OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
                 ])),
             }],
             updater: None,
@@ -365,7 +365,7 @@ impl OptionSpec for ProtectControlGroups {
                 value: OptionValue::Boolean(true),
                 desc: OptionEffect::Simple(OptionValueEffect::Multiple(vec![
                     OptionValueEffect::DenyWrite(PathDescription::base("/sys/fs/cgroup/")),
-                    OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                    OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
                 ])),
             }],
             updater: None,
@@ -395,7 +395,7 @@ impl OptionSpec for ProtectProc {
                 value: OptionValue::String("ptraceable".to_owned()),
                 desc: OptionEffect::Simple(OptionValueEffect::Multiple(vec![
                     OptionValueEffect::RemovePath(PathDescription::pattern("^/proc/[0-9]+(/|$)")),
-                    OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                    OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
                 ])),
             }],
             updater: None,
@@ -422,7 +422,7 @@ impl OptionSpec for ProcSubset {
                     OptionValueEffect::RemovePath(PathDescription::pattern(
                         "^/proc/[^/]*[^0-9/]+[^/]*",
                     )),
-                    OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                    OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
                 ])),
             }],
             updater: None,
@@ -558,7 +558,7 @@ impl OptionSpec for ReadOnlyPaths {
                 ),
                 desc: OptionEffect::Simple(OptionValueEffect::Multiple(vec![
                     OptionValueEffect::DenyWrite(PathDescription::base("/")),
-                    OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                    OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
                 ])),
             }],
             updater: Some(self),
@@ -624,7 +624,7 @@ impl OptionUpdater for ReadOnlyPaths {
                     },
                 ]
             }
-            OptionValueEffect::DenyAction(DeniableAction::MountToHost) => {
+            OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace) => {
                 vec![OptionWithValue {
                     name: "PrivateMounts",
                     value: OptionValue::Boolean(true),
@@ -657,7 +657,7 @@ impl OptionSpec for InaccessiblePaths {
             ),
             desc: OptionEffect::Simple(OptionValueEffect::Multiple(vec![
                 OptionValueEffect::RemovePath(PathDescription::base("/")),
-                OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
             ])),
         }];
         // To avoid InaccessiblePaths being completely disabled simply because of the equivalent of 'ls /',
@@ -694,7 +694,9 @@ impl OptionSpec for InaccessiblePaths {
                             .map(|p| {
                                 OptionValueEffect::Multiple(vec![
                                     OptionValueEffect::RemovePath(PathDescription::base(p)),
-                                    OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                                    OptionValueEffect::DenyAction(
+                                        DeniableAction::HostMountNamespace,
+                                    ),
                                 ])
                             })
                             .collect(),
@@ -852,7 +854,7 @@ impl OptionUpdater for InaccessiblePaths {
                 }
                 new_opts
             }
-            OptionValueEffect::DenyAction(DeniableAction::MountToHost) => {
+            OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace) => {
                 vec![OptionWithValue {
                     name: "PrivateMounts",
                     value: OptionValue::Boolean(true),
@@ -904,7 +906,7 @@ impl OptionSpec for NoExecPaths {
                 ),
                 desc: OptionEffect::Simple(OptionValueEffect::Multiple(vec![
                     OptionValueEffect::DenyExec(PathDescription::base("/")),
-                    OptionValueEffect::DenyAction(DeniableAction::MountToHost),
+                    OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
                 ])),
             }],
             updater: Some(self),
@@ -967,7 +969,7 @@ impl OptionUpdater for NoExecPaths {
                     },
                 ]
             }
-            OptionValueEffect::DenyAction(DeniableAction::MountToHost) => {
+            OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace) => {
                 vec![OptionWithValue {
                     name: "PrivateMounts",
                     value: OptionValue::Boolean(true),
@@ -1029,19 +1031,18 @@ struct PrivateNetwork;
 
 impl OptionSpec for PrivateNetwork {
     fn enabled_if(&self, ctx: &OptionContext<'_>) -> bool {
+        // May break a service using a socket file descriptor passed from another process: rare, but possible,
+        // so only in aggressive mode
         ctx.can_use_namespaces() && matches!(ctx.hardening_opts.mode, HardeningMode::Aggressive)
     }
 
     fn build(&self, _ctx: &OptionContext<'_>) -> OptionDescription {
-        // For now we enable this option if no sockets are used at all, in theory this could break if
-        // a socket file descriptor is passed to it from another process.
-        // Although this is probably a very rare/niche case, it is possible, so we consider it only in aggressive mode
         OptionDescription {
             name: "PrivateNetwork",
             possible_values: vec![OptionValueDescription {
                 value: OptionValue::Boolean(true),
-                desc: OptionEffect::Simple(OptionValueEffect::DenyAction(
-                    DeniableAction::NetworkActivity(
+                desc: OptionEffect::Simple(OptionValueEffect::Multiple(vec![
+                    OptionValueEffect::DenyAction(DeniableAction::NetworkActivity(
                         NetworkActivity {
                             af: SetSpecifier::All,
                             proto: SetSpecifier::All,
@@ -1050,8 +1051,11 @@ impl OptionSpec for PrivateNetwork {
                             address: SetSpecifier::All,
                         }
                         .into(),
-                    ),
-                )),
+                    )),
+                    // Implies a mount namespace unless PrivateMounts=false
+                    // https://github.com/systemd/systemd/blob/v257/src/core/execute.c#L306
+                    OptionValueEffect::DenyAction(DeniableAction::HostMountNamespace),
+                ])),
             }],
             updater: None,
         }

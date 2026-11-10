@@ -692,6 +692,20 @@ mod tests {
     }
 
     #[test]
+    fn resolve_private_network_host_mount_namespace() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let (opts, hardening_opts) = test_options_strict(&["PrivateNetwork"]);
+        let expected = [OptionWithValue {
+            name: "PrivateNetwork",
+            value: OptionValue::Boolean(true),
+        }];
+        assert_eq!(resolve(&opts, &[], &hardening_opts), expected);
+        let actions = [ProgramAction::HostMountNamespace];
+        assert!(resolve(&opts, &actions, &hardening_opts).is_empty());
+    }
+
+    #[test]
     fn resolve_private_devices_base_write() {
         let _ = simple_logger::SimpleLogger::new().init();
 

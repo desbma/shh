@@ -302,11 +302,11 @@ impl EmptyPathDescription {
 /// A program action that can be directly denied by a systemd option.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DeniableAction {
+    HostMountNamespace,
     HugePageMemoryMapping,
     KillOther,
     LockMemoryMapping,
     MknodSpecial,
-    MountToHost,
     NetworkActivity(Box<NetworkActivity>),
     Read(PathBuf),
     SetAlarm,
@@ -330,13 +330,13 @@ impl DeniableAction {
                     false
                 }
             }
+            Self::HostMountNamespace => matches!(action, ProgramAction::HostMountNamespace),
             Self::HugePageMemoryMapping => {
                 matches!(action, ProgramAction::HugePageMemoryMapping)
             }
             Self::KillOther => matches!(action, ProgramAction::KillOther),
             Self::LockMemoryMapping => matches!(action, ProgramAction::LockMemoryMapping),
             Self::MknodSpecial => matches!(action, ProgramAction::MknodSpecial),
-            Self::MountToHost => matches!(action, ProgramAction::MountToHost),
             Self::Read(path) => matches!(action, ProgramAction::Read(p) if p == path),
             Self::SetAlarm => matches!(action, ProgramAction::SetAlarm),
             Self::SetRealtimeScheduler => matches!(action, ProgramAction::SetRealtimeScheduler),

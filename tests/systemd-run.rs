@@ -18,6 +18,8 @@ mod tests {
         path::Path,
         process,
         sync::LazyLock,
+        thread,
+        time::Duration,
     };
 
     use assert_cmd::{
@@ -29,6 +31,8 @@ mod tests {
 
     static ALL_SHH_RUN_OPTS: LazyLock<Vec<Vec<&'static str>>> = LazyLock::new(all_shh_run_opts);
     const KERNEL_LOG_REGEX: &str = r"\[\ *[0-9]+\.[0-9]+\] ";
+    /// Interval between writes of a file watched by the service
+    const WRITE_INTERVAL: Duration = Duration::from_millis(100);
     /// Python script attempting to create an entry, existing or not
     const CREATE_ENTRY_SCRIPT: &str = "
 import ctypes, os, stat, sys
@@ -1080,6 +1084,29 @@ else:
             ];
             profile_and_run(&cmd, false);
         }
+    }
+
+    #[test]
+    fn systemd_run_fanotify_mount_mark() {
+        // Watch the mount of a file in /var/lib written outside the service, seen only through the host's
+        // mounts
+        let file = tempfile::NamedTempFile::new_in("/var/lib").unwrap();
+        let path = file.path().to_owned();
+        // Stops once the file is removed
+        thread::spawn(move || {
+            while let Ok(mut f) = fs::OpenOptions::new().append(true).open(&path) {
+                f.write_all(b"x").unwrap();
+                thread::sleep(WRITE_INTERVAL);
+            }
+        });
+        let cmd = [
+            "python3",
+            "-c",
+            PATH_SYSCALL_SCRIPT,
+            "fanotify_mark-mount",
+            file.path().to_str().unwrap(),
+        ];
+        profile_and_run(&cmd, false);
     }
 
     #[test]

@@ -16,6 +16,7 @@
 - `src/systemd/`: Systemd option generation and service management
 - `src/summarize/`: Profiling data summarization
 - `tests/`: Integration tests using `assert_cmd` and `insta` snapshots
+- Profile data files (written by `shh run -p`, read by `merge-profile-data`) only live within one profiled service run: keeping their format compatible across shh versions is **not** a goal
 
 ## Code Style
 

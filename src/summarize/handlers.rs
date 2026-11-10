@@ -564,7 +564,7 @@ impl SyscallHandler for MountHandler {
             }) => mount_flags
         );
         if mount_flags.is_flag_set("MS_SHARED") {
-            actions.push(ProgramAction::MountToHost);
+            actions.push(ProgramAction::HostMountNamespace);
         }
         Ok(())
     }
@@ -1380,6 +1380,11 @@ impl SyscallHandler for FanotifyMarkHandler {
         // A flush removes marks without looking up the path
         if flags.is_flag_set("FAN_MARK_FLUSH") {
             return Ok(());
+        }
+        // A mount mark watches the copy of the mount in the caller's namespace; older strace versions print
+        // FAN_MARK_MNTNS, which is not one, as FAN_MARK_MOUNT|FAN_MARK_FILESYSTEM
+        if flags.is_flag_set("FAN_MARK_MOUNT") && !flags.is_flag_set("FAN_MARK_FILESYSTEM") {
+            actions.push(ProgramAction::HostMountNamespace);
         }
         self.path.handle(sc, actions, state)
     }
@@ -2454,7 +2459,7 @@ x86_Thread_features_locked:
 
         let result = handler.handle(&sc, &mut actions, &mut state);
         assert!(result.is_ok());
-        assert_eq!(actions, vec![ProgramAction::MountToHost]);
+        assert_eq!(actions, vec![ProgramAction::HostMountNamespace]);
     }
 
     #[test]

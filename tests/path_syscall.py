@@ -3,14 +3,18 @@
 import ctypes
 import errno
 import os
+import select
 import struct
 import sys
 
+EVENT_TIMEOUT_S = 5
 # Values from <fcntl.h>, <linux/fs.h>, <linux/stat.h>, <sys/fanotify.h> and
 # <sys/inotify.h>
 AT_FDCWD = -100
 AT_HANDLE_FID = 0x200
+FAN_CLASS_NOTIF = 0
 FAN_MARK_ADD = 1
+FAN_MARK_MOUNT = 0x10
 FAN_MODIFY = 2
 FAN_REPORT_FID = 0x200
 FILE_ATTR_SIZE_VER0 = 24
@@ -77,6 +81,21 @@ match kind:
                 p,
             )
         )
+    case "fanotify_mark-mount":
+        # Wait for a write to the path from another process
+        fd = check(libc.syscall(SYS_fanotify_init, FAN_CLASS_NOTIF, os.O_RDONLY))
+        check(
+            libc.syscall(
+                SYS_fanotify_mark,
+                fd,
+                FAN_MARK_ADD | FAN_MARK_MOUNT,
+                ctypes.c_uint64(FAN_MODIFY),
+                AT_FDCWD,
+                p,
+            )
+        )
+        if not select.select([fd], [], [], EVENT_TIMEOUT_S)[0]:
+            raise TimeoutError(f"No event from the mount of {path}")
     case "file_getattr":
         check(
             libc.syscall(

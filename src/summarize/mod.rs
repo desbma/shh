@@ -35,6 +35,8 @@ pub(crate) enum ProgramAction {
     Create(PathBuf),
     /// Exec a path
     Exec(PathBuf),
+    /// Act on the host's mount namespace
+    HostMountNamespace,
     /// Memory mapping with huge pages
     HugePageMemoryMapping,
     /// Send signal to other process ("other" being defined as requiring `CAP_KILL`)
@@ -43,8 +45,6 @@ pub(crate) enum ProgramAction {
     LockMemoryMapping,
     /// Create special files
     MknodSpecial,
-    /// Mount propagated to host
-    MountToHost,
     /// Network (socket) activity
     NetworkActivity(Box<NetworkActivity>),
     /// Access a path (open, stat, read...)
@@ -2584,6 +2584,43 @@ mod tests {
                     0,
                 )),
                 vec![ProgramAction::Syscalls(["fanotify_mark".into()].into())]
+            );
+        }
+    }
+
+    #[test]
+    fn fanotify_mark_mount_acts_on_host_mount_namespace() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        for (flags, mut expected) in [
+            (
+                &["FAN_MARK_ADD", "FAN_MARK_MOUNT"][..],
+                vec![ProgramAction::HostMountNamespace],
+            ),
+            // FAN_MARK_MNTNS, as printed by strace 6.13
+            (
+                &["FAN_MARK_ADD", "FAN_MARK_MOUNT", "FAN_MARK_FILESYSTEM"],
+                vec![],
+            ),
+            (&["FAN_MARK_ADD", "FAN_MARK_MNTNS"], vec![]),
+        ] {
+            expected.extend([
+                ProgramAction::Read("/etc".into()),
+                ProgramAction::Syscalls(["fanotify_mark".into()].into()),
+            ]);
+            assert_eq!(
+                summarize_syscall(make_syscall(
+                    "fanotify_mark",
+                    vec![
+                        fd_expr(3, "anon_inode:[fanotify]"),
+                        binary_or_flags(flags),
+                        named_symbol("FAN_MODIFY"),
+                        named_symbol("AT_FDCWD"),
+                        buf_expr(b"/etc"),
+                    ],
+                    0,
+                )),
+                expected
             );
         }
     }
