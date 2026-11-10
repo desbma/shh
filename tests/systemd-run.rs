@@ -31,7 +31,12 @@ mod tests {
     const KERNEL_LOG_REGEX: &str = r"\[\ *[0-9]+\.[0-9]+\] ";
     /// Python script attempting to create an entry, existing or not
     const CREATE_ENTRY_SCRIPT: &str = "
-import ctypes, os, sys
+import ctypes, os, stat, sys
+
+# Values from <fcntl.h>, <stdio.h> and x86_64 <sys/syscall.h>
+AT_FDCWD = -100
+RENAME_NOREPLACE = 1
+SYS_mknod = 133
 
 kind, path, src, held = sys.argv[1:]
 libc = ctypes.CDLL(None, use_errno=True)
@@ -55,11 +60,10 @@ try:
     elif kind == 'link':
         os.link(src, path)
     elif kind == 'rename':
-        # renameat2(AT_FDCWD, src, AT_FDCWD, path, RENAME_NOREPLACE)
-        check(libc.renameat2(-100, src.encode(), -100, path.encode(), 1))
+        check(libc.renameat2(AT_FDCWD, src.encode(), AT_FDCWD, path.encode(), RENAME_NOREPLACE))
     elif kind == 'mknod':
         # mknod syscall on x86_64, glibc's mkfifo calls mknodat
-        check(libc.syscall(133, path.encode(), 0o10644, 0))
+        check(libc.syscall(SYS_mknod, path.encode(), stat.S_IFIFO | 0o644, 0))
     else:
         raise ValueError(kind)
 except FileExistsError:
@@ -73,6 +77,9 @@ else:
 if kind == 'mkdir-p':
     open(os.path.join(path, 'file'), 'w').close()
 ";
+
+    /// Python script making a syscall of a given kind on a path
+    const PATH_SYSCALL_SCRIPT: &str = include_str!("path_syscall.py");
 
     /// Run `shh run` for a given command, and return generated systemd options
     fn generate_options(cmd: &[&str], run_opts: &[&str]) -> Vec<String> {
@@ -694,8 +701,8 @@ ptrace(PTRACE_DETACH, target_pid)
         let cmd = [
             "python3",
             "-c",
-            "import ctypes, os, struct, sys; how = struct.pack('QQQ', os.O_WRONLY | os.O_CREAT, 0o644, 0); \
-             sys.exit(ctypes.CDLL(None).syscall(437, -100, sys.argv[1].encode(), how, len(how)) < 0)",
+            PATH_SYSCALL_SCRIPT,
+            "openat2",
             path.to_str().unwrap(),
         ];
         profile_and_run_creating_path(&cmd, &path);
@@ -993,27 +1000,15 @@ else:
             eprintln!("Kernel without setxattrat and removexattrat, skipping");
             return;
         }
-        let script = "
-import ctypes, errno, os, struct, sys
-
-kind, path = sys.argv[1:]
-libc = ctypes.CDLL(None, use_errno=True)
-if kind == 'setxattrat':
-    value = ctypes.create_string_buffer(b'value')
-    # struct xattr_args: value pointer, size, flags
-    args = struct.pack('QII', ctypes.addressof(value), 5, 0)
-    ret = libc.syscall(463, -100, path.encode(), 0, b'user.test', args, ctypes.c_size_t(len(args)))
-elif kind == 'removexattrat':
-    ret = libc.syscall(466, -100, path.encode(), 0, b'user.absent')
-else:
-    raise ValueError(kind)
-if ret < 0 and not (kind == 'removexattrat' and ctypes.get_errno() == errno.ENODATA):
-    err = ctypes.get_errno()
-    raise OSError(err, os.strerror(err), path)
-";
         let file = tempfile::NamedTempFile::new_in("/var/lib").unwrap();
         for kind in ["setxattrat", "removexattrat"] {
-            let cmd = ["python3", "-c", script, kind, file.path().to_str().unwrap()];
+            let cmd = [
+                "python3",
+                "-c",
+                PATH_SYSCALL_SCRIPT,
+                kind,
+                file.path().to_str().unwrap(),
+            ];
             profile_and_run(&cmd, false);
         }
     }
@@ -1026,100 +1021,20 @@ if ret < 0 and not (kind == 'removexattrat' and ctypes.get_errno() == errno.ENOD
             eprintln!("Kernel or strace without file_setattr, skipping");
             return;
         }
-        let script = "
-import ctypes, os, sys
-
-# Values from <fcntl.h>, <linux/fs.h> and x86_64 <sys/syscall.h>
-AT_FDCWD = -100
-FILE_ATTR_SIZE_VER0 = 24
-SYS_file_setattr = 469
-
-path = sys.argv[1]
-libc = ctypes.CDLL(None, use_errno=True)
-attr = ctypes.create_string_buffer(FILE_ATTR_SIZE_VER0)
-if libc.syscall(SYS_file_setattr, AT_FDCWD, path.encode(), attr, ctypes.c_size_t(len(attr)), 0) < 0:
-    err = ctypes.get_errno()
-    raise OSError(err, os.strerror(err), path)
-";
         let file = tempfile::NamedTempFile::new_in("/var/lib").unwrap();
-        let cmd = ["python3", "-c", script, file.path().to_str().unwrap()];
+        let cmd = [
+            "python3",
+            "-c",
+            PATH_SYSCALL_SCRIPT,
+            "file_setattr",
+            file.path().to_str().unwrap(),
+        ];
         profile_and_run(&cmd, false);
     }
 
     #[test]
     fn systemd_run_read_path() {
         // Query a file in /var/lib, or a symlink to it, with a single syscall
-        let script = "
-import ctypes, errno, os, struct, sys
-
-kind, path = sys.argv[1:]
-libc = ctypes.CDLL(None, use_errno=True)
-libc.syscall.restype = ctypes.c_long
-p = path.encode()
-buf = ctypes.create_string_buffer(4096)
-size = ctypes.c_size_t(len(buf))
-AT_FDCWD = -100
-
-
-def check(ret, allowed_errno=None):
-    err = ctypes.get_errno()
-    if ret < 0 and err != allowed_errno:
-        raise OSError(err, os.strerror(err), path)
-    return ret
-
-
-# x86_64 syscall numbers
-if kind == 'access':
-    check(libc.syscall(21, p, os.W_OK))
-elif kind == 'faccessat':
-    check(libc.syscall(269, AT_FDCWD, p, os.W_OK))
-elif kind == 'faccessat2':
-    check(libc.syscall(439, AT_FDCWD, p, os.W_OK, 0))
-elif kind == 'fanotify_mark':
-    # FAN_REPORT_FID group, then FAN_MARK_ADD of FAN_MODIFY
-    fd = check(libc.syscall(300, 0x200, os.O_RDONLY))
-    check(libc.syscall(301, fd, 1, ctypes.c_uint64(2), AT_FDCWD, p))
-elif kind == 'file_getattr':
-    check(libc.syscall(468, AT_FDCWD, p, buf, ctypes.c_size_t(24), 0))
-elif kind == 'getxattr':
-    check(libc.syscall(191, p, b'user.absent', buf, size), errno.ENODATA)
-elif kind == 'getxattrat':
-    # struct xattr_args: value pointer, size, flags
-    args = struct.pack('QII', ctypes.addressof(buf), len(buf), 0)
-    check(libc.syscall(464, AT_FDCWD, p, 0, b'user.absent', args, ctypes.c_size_t(len(args))), errno.ENODATA)
-elif kind == 'inotify_add_watch':
-    # IN_MODIFY
-    check(libc.syscall(254, check(libc.syscall(294, 0)), p, 2))
-elif kind == 'lgetxattr':
-    check(libc.syscall(192, p, b'user.absent', buf, size), errno.ENODATA)
-elif kind == 'listxattr':
-    check(libc.syscall(194, p, buf, size))
-elif kind == 'listxattrat':
-    check(libc.syscall(465, AT_FDCWD, p, 0, buf, size))
-elif kind == 'llistxattr':
-    check(libc.syscall(195, p, buf, size))
-elif kind == 'name_to_handle_at':
-    # struct file_handle of MAX_HANDLE_SZ bytes, AT_HANDLE_FID
-    struct.pack_into('I', buf, 0, 128)
-    check(libc.syscall(303, AT_FDCWD, p, buf, ctypes.byref(ctypes.c_int()), 0x200))
-elif kind == 'name_to_handle_at-size':
-    # struct file_handle of 0 bytes, AT_HANDLE_FID
-    struct.pack_into('I', buf, 0, 0)
-    check(libc.syscall(303, AT_FDCWD, p, buf, ctypes.byref(ctypes.c_int()), 0x200), errno.EOVERFLOW)
-elif kind == 'readlink':
-    check(libc.syscall(89, p, buf, len(buf)))
-elif kind == 'readlink-file':
-    check(libc.syscall(89, p, buf, len(buf)), errno.EINVAL)
-elif kind == 'readlinkat':
-    check(libc.syscall(267, AT_FDCWD, p, buf, len(buf)))
-elif kind == 'statfs':
-    check(libc.syscall(137, p, buf))
-elif kind == 'statx':
-    # STATX_BASIC_STATS
-    check(libc.syscall(332, AT_FDCWD, p, 0, 0x7ff, buf))
-else:
-    raise ValueError(kind)
-";
         let dir = tempfile::tempdir_in("/var/lib").unwrap();
         let file = dir.path().join("file");
         let link = dir.path().join("link");
@@ -1156,7 +1071,13 @@ else:
                 eprintln!("Kernel or strace without {kind}, skipping");
                 continue;
             }
-            let cmd = ["python3", "-c", script, kind, path.to_str().unwrap()];
+            let cmd = [
+                "python3",
+                "-c",
+                PATH_SYSCALL_SCRIPT,
+                kind,
+                path.to_str().unwrap(),
+            ];
             profile_and_run(&cmd, false);
         }
     }
