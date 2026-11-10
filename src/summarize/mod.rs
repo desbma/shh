@@ -390,6 +390,15 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
         },
         action: ProgramAction::Read,
     },
+    "file_setattr" => &PathHandler {
+        relfd: Some(0),
+        path: 1,
+        follow: FollowSymlink::UnlessNoFollowFlag {
+            flags: 4,
+            no_follow_flag: "AT_SYMLINK_NOFOLLOW",
+        },
+        action: ProgramAction::Write,
+    },
     "fork" => &ForkHandler,
     "fstat" => &StatFdHandler { fd: 0 },
     "futimesat" => &PathHandler {
@@ -1563,6 +1572,19 @@ mod tests {
                         buf_expr(b"link"),
                         int_literal(0),
                         int_literal(0),
+                        flags.clone(),
+                    ],
+                ),
+                (
+                    "file_setattr",
+                    vec![
+                        dir_fd.clone(),
+                        buf_expr(b"link"),
+                        Expression::Struct(HashMap::from([(
+                            "fa_xflags".to_owned(),
+                            int_literal(0),
+                        )])),
+                        int_literal(24),
                         flags.clone(),
                     ],
                 ),

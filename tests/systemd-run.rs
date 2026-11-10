@@ -1019,6 +1019,34 @@ if ret < 0 and not (kind == 'removexattrat' and ctypes.get_errno() == errno.ENOD
     }
 
     #[test]
+    fn systemd_run_file_setattr() {
+        // Set the attributes of a file in /var/lib to their current, zero, values
+        // Decoded by strace from 6.17
+        if kernel_version() < (6, 17) || strace_version() < (6, 17) {
+            eprintln!("Kernel or strace without file_setattr, skipping");
+            return;
+        }
+        let script = "
+import ctypes, os, sys
+
+# Values from <fcntl.h>, <linux/fs.h> and x86_64 <sys/syscall.h>
+AT_FDCWD = -100
+FILE_ATTR_SIZE_VER0 = 24
+SYS_file_setattr = 469
+
+path = sys.argv[1]
+libc = ctypes.CDLL(None, use_errno=True)
+attr = ctypes.create_string_buffer(FILE_ATTR_SIZE_VER0)
+if libc.syscall(SYS_file_setattr, AT_FDCWD, path.encode(), attr, ctypes.c_size_t(len(attr)), 0) < 0:
+    err = ctypes.get_errno()
+    raise OSError(err, os.strerror(err), path)
+";
+        let file = tempfile::NamedTempFile::new_in("/var/lib").unwrap();
+        let cmd = ["python3", "-c", script, file.path().to_str().unwrap()];
+        profile_and_run(&cmd, false);
+    }
+
+    #[test]
     fn systemd_run_read_path() {
         // Query a file in /var/lib, or a symlink to it, with a single syscall
         let script = "
