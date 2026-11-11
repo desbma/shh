@@ -275,6 +275,8 @@ enum FdOrPath<T> {
 // - https://filippo.io/linux-syscall-table/
 // - https://linasm.sourceforge.net/docs/syscalls/filesystem.php
 //
+// 32-bit ABI names share the entry of their 64-bit call, the only exception to the alphabetical order of keys
+//
 static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::phf_map! {
     "accept" => &NetworkHandler { fd: 0, sockaddr: 1 },
     "accept4" => &NetworkHandler { fd: 0, sockaddr: 1 },
@@ -297,7 +299,7 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
         follow: FollowSymlink::Always,
         action: ProgramAction::Write,
     },
-    "chown" => &PathHandler {
+    "chown" | "chown32" => &PathHandler {
         relfd: None,
         path: 0,
         follow: FollowSymlink::Always,
@@ -373,7 +375,7 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
         },
         action: ProgramAction::Write,
     },
-    "fchown" => &FdWriteHandler { fd: 0 },
+    "fchown" | "fchown32" => &FdWriteHandler { fd: 0 },
     "fchownat" => &PathHandler {
         relfd: Some(0),
         path: 1,
@@ -404,14 +406,14 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
     "fork" => &ForkHandler,
     "fremovexattr" => &FdWriteHandler { fd: 0 },
     "fsetxattr" => &FdWriteHandler { fd: 0 },
-    "fstat" => &StatFdHandler { fd: 0 },
+    "fstat" | "fstat64" | "oldfstat" => &StatFdHandler { fd: 0 },
     "futimesat" => &PathHandler {
         relfd: Some(0),
         path: 1,
         follow: FollowSymlink::Always,
         action: ProgramAction::Write,
     },
-    "getdents" => &StatFdHandler { fd: 0 },
+    "getdents" | "readdir" => &StatFdHandler { fd: 0 },
     "getxattr" => &PathHandler {
         relfd: None,
         path: 0,
@@ -438,7 +440,7 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
     },
     "ioctl" => &IoctlHandler { fd: 0, request: 1 },
     "kill" => &KillHandler { pid: 0, sig: 1 },
-    "lchown" => &PathHandler {
+    "lchown" | "lchown32" => &PathHandler {
         relfd: None,
         path: 0,
         follow: FollowSymlink::OnTrailingSlash,
@@ -511,7 +513,7 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
         follow: FollowSymlink::OnTrailingSlash,
         action: ProgramAction::Write,
     },
-    "lstat" => &PathHandler {
+    "lstat" | "lstat64" | "oldlstat" => &PathHandler {
         relfd: None,
         path: 0,
         follow: FollowSymlink::Always,
@@ -538,12 +540,7 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
         path: FdOrPath::Fd(1),
         mode: 2,
     },
-    "mmap" => &MmapHandler {
-        prot: 2,
-        flags: Some(3),
-        fd: Some(4),
-    },
-    "mmap2" => &MmapHandler {
+    "mmap" | "mmap2" => &MmapHandler {
         prot: 2,
         flags: Some(3),
         fd: Some(4),
@@ -560,7 +557,7 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
         follow: FollowSymlink::IfFollowFlag(4),
         action: ProgramAction::Read,
     },
-    "newfstatat" => &PathHandler {
+    "newfstatat" | "fstatat64" => &PathHandler {
         relfd: Some(0),
         path: 1,
         follow: FollowSymlink::Always,
@@ -666,13 +663,13 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
     },
     "shmctl" => &ShmCtlHandler { op: 1 },
     "socket" => &SocketHandler { af: 0, flags: 1 },
-    "stat" => &PathHandler {
+    "stat" | "stat64" | "oldstat" => &PathHandler {
         relfd: None,
         path: 0,
         follow: FollowSymlink::Always,
         action: ProgramAction::Read,
     },
-    "statfs" => &PathHandler {
+    "statfs" | "statfs64" => &PathHandler {
         relfd: None,
         path: 0,
         follow: FollowSymlink::Always,
@@ -700,7 +697,7 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
         action: ProgramAction::Create,
     },
     "timer_create" => &TimerCreateHandler { clockid: 0 },
-    "truncate" => &PathHandler {
+    "truncate" | "truncate64" => &PathHandler {
         relfd: None,
         path: 0,
         follow: FollowSymlink::Always,
@@ -725,7 +722,7 @@ static SYSCALL_MAP: phf::Map<&'static str, &'static dyn SyscallHandler> = phf::p
         follow: FollowSymlink::Always,
         action: ProgramAction::Write,
     },
-    "utimensat" => &PathHandler {
+    "utimensat" | "utimensat_time64" => &PathHandler {
         relfd: Some(0),
         path: 1,
         follow: FollowSymlink::UnlessNoFollowFlag {
@@ -1427,26 +1424,26 @@ mod tests {
     fn utimensat_null_path_writes_fd_path() {
         let _ = simple_logger::SimpleLogger::new().init();
 
-        let state = program_state();
-
         // glibc's futimens(fd, times)
         let fd = fd_expr(3, "/var/lib/test");
-        let syscalls = [Ok(syscall(
-            "utimensat",
-            vec![
-                fd,
-                named_symbol("NULL"),
-                named_symbol("NULL"),
-                int_literal(0),
-            ],
-        ))];
-        assert_eq!(
-            summarize(syscalls, &[], state).unwrap(),
-            vec![
-                ProgramAction::Write("/var/lib/test".into()),
-                ProgramAction::Syscalls(["utimensat".into()].into()),
-            ]
-        );
+        for name in ["utimensat", "utimensat_time64"] {
+            let syscalls = [Ok(syscall(
+                name,
+                vec![
+                    fd.clone(),
+                    named_symbol("NULL"),
+                    named_symbol("NULL"),
+                    int_literal(0),
+                ],
+            ))];
+            assert_eq!(
+                summarize(syscalls, &[], program_state()).unwrap(),
+                vec![
+                    ProgramAction::Write("/var/lib/test".into()),
+                    ProgramAction::Syscalls([name.into()].into()),
+                ]
+            );
+        }
     }
 
     #[test]
@@ -1455,10 +1452,17 @@ mod tests {
 
         // Descriptor of a file opened read-only
         let fd = fd_expr(3, "/var/lib/test");
+        let ioctl =
+            |request, arg| make_syscall("ioctl", vec![fd.clone(), named_symbol(request), arg], 0);
         for sc in [
             make_syscall("fchmod", vec![fd.clone(), int_literal(0o640)], 0),
             make_syscall(
                 "fchown",
+                vec![fd.clone(), int_literal(0), int_literal(0)],
+                0,
+            ),
+            make_syscall(
+                "fchown32",
                 vec![fd.clone(), int_literal(0), int_literal(0)],
                 0,
             ),
@@ -1479,53 +1483,33 @@ mod tests {
                 vec![fd.clone(), buf_expr(b"user.absent")],
                 "ENODATA",
             ),
-            make_syscall(
-                "ioctl",
-                vec![
-                    fd.clone(),
-                    named_symbol("FS_IOC_SETFLAGS"),
-                    Expression::Collection {
-                        complement: false,
-                        values: vec![(None, int_literal(0))],
-                    },
-                ],
-                0,
+            ioctl(
+                "FS_IOC_SETFLAGS",
+                Expression::Collection {
+                    complement: false,
+                    values: vec![(None, int_literal(0))],
+                },
             ),
-            make_syscall(
-                "ioctl",
-                vec![
-                    fd.clone(),
-                    named_symbol("FS_IOC_FSSETXATTR"),
-                    Expression::Struct(HashMap::from([("fsx_xflags".to_owned(), int_literal(0))])),
-                ],
-                0,
+            ioctl(
+                "FS_IOC_FSSETXATTR",
+                Expression::Struct(HashMap::from([("fsx_xflags".to_owned(), int_literal(0))])),
             ),
-            make_syscall(
-                "ioctl",
-                vec![
-                    fd.clone(),
-                    named_symbol("FS_IOC_SETVERSION"),
-                    buf_expr(b"\x00\x00\x00\x00\x00\x00\x00\x00"),
-                ],
-                0,
+            ioctl(
+                "FS_IOC_SETVERSION",
+                buf_expr(b"\x00\x00\x00\x00\x00\x00\x00\x00"),
             ),
-            make_syscall(
-                "ioctl",
-                vec![
-                    fd.clone(),
-                    named_symbol("FS_IOC_ENABLE_VERITY"),
-                    int_literal(0x7ffd_0e48_4cc0),
-                ],
-                0,
+            ioctl(
+                "FS_IOC32_SETFLAGS",
+                Expression::Collection {
+                    complement: false,
+                    values: vec![(None, int_literal(0))],
+                },
             ),
-            make_syscall(
-                "ioctl",
-                vec![
-                    fd.clone(),
-                    named_symbol("FS_IOC_SET_ENCRYPTION_POLICY"),
-                    int_literal(0x7ffd_0e48_4cc0),
-                ],
-                0,
+            ioctl("FS_IOC32_SETVERSION", buf_expr(b"\x00\x00\x00\x00")),
+            ioctl("FS_IOC_ENABLE_VERITY", int_literal(0x7ffd_0e48_4cc0)),
+            ioctl(
+                "FS_IOC_SET_ENCRYPTION_POLICY",
+                int_literal(0x7ffd_0e48_4cc0),
             ),
         ] {
             let name = sc.name.clone();
@@ -1534,6 +1518,27 @@ mod tests {
                 vec![
                     ProgramAction::Write("/var/lib/test".into()),
                     ProgramAction::Syscalls([name].into()),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn fd_reads_read_fd_path() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        let fd = fd_expr(3, "/var/lib/test");
+        for name in ["fstat", "fstat64", "getdents", "oldfstat", "readdir"] {
+            let sc = make_syscall(
+                name,
+                vec![fd.clone(), Expression::Struct(HashMap::new())],
+                0,
+            );
+            assert_eq!(
+                summarize_syscall(sc),
+                vec![
+                    ProgramAction::Read("/var/lib/test".into()),
+                    ProgramAction::Syscalls([name.into()].into()),
                 ]
             );
         }
@@ -1621,6 +1626,18 @@ mod tests {
                 "chmod",
                 vec![buf_expr(link_str.as_bytes()), int_literal(0o644)],
             )),
+            Ok(syscall(
+                "chown32",
+                vec![
+                    buf_expr(link_str.as_bytes()),
+                    int_literal(0),
+                    int_literal(0),
+                ],
+            )),
+            Ok(syscall(
+                "truncate64",
+                vec![buf_expr(link_str.as_bytes()), int_literal(0)],
+            )),
             Ok(syscall("unlink", vec![buf_expr(link_str.as_bytes())])),
             // A trailing slash follows the symlink despite AT_SYMLINK_NOFOLLOW
             Ok(syscall(
@@ -1642,6 +1659,10 @@ mod tests {
             vec![
                 ProgramAction::Write(link.clone()),
                 ProgramAction::Read(link.clone()),
+                ProgramAction::Write(target.clone()),
+                ProgramAction::Read(link.clone()),
+                ProgramAction::Write(target.clone()),
+                ProgramAction::Read(link.clone()),
                 ProgramAction::Write(target),
                 ProgramAction::Remove(link),
                 ProgramAction::Read(link_dir.clone()),
@@ -1649,7 +1670,14 @@ mod tests {
                 ProgramAction::Read(link_dir),
                 ProgramAction::Remove(target_dir.join("file")),
                 ProgramAction::Syscalls(
-                    ["chmod".into(), "unlink".into(), "utimensat".into()].into()
+                    [
+                        "chmod".into(),
+                        "chown32".into(),
+                        "truncate64".into(),
+                        "unlink".into(),
+                        "utimensat".into()
+                    ]
+                    .into()
                 ),
             ]
         );
@@ -2358,34 +2386,32 @@ mod tests {
         let link = temp_dir.path().join("link");
         fs::create_dir(&target).unwrap();
         unix::fs::symlink(&target, &link).unwrap();
-        let lchown = |path: &[u8]| {
-            syscall(
-                "lchown",
-                vec![buf_expr(path), int_literal(0), int_literal(0)],
-            )
-        };
         let link_bytes = link.as_os_str().as_bytes();
-        assert_eq!(
-            summarize([Ok(lchown(link_bytes))], &[], program_state()).unwrap(),
-            vec![
-                ProgramAction::Write(link.clone()),
-                ProgramAction::Syscalls(["lchown".into()].into()),
-            ]
-        );
-        for suffix in [&b"/"[..], b"/."] {
+        for name in ["lchown", "lchown32"] {
+            let lchown =
+                |path: &[u8]| syscall(name, vec![buf_expr(path), int_literal(0), int_literal(0)]);
             assert_eq!(
-                summarize(
-                    [Ok(lchown(&[link_bytes, suffix].concat()))],
-                    &[],
-                    program_state()
-                )
-                .unwrap(),
+                summarize([Ok(lchown(link_bytes))], &[], program_state()).unwrap(),
                 vec![
-                    ProgramAction::Read(link.clone()),
-                    ProgramAction::Write(target.clone()),
-                    ProgramAction::Syscalls(["lchown".into()].into()),
+                    ProgramAction::Write(link.clone()),
+                    ProgramAction::Syscalls([name.into()].into()),
                 ]
             );
+            for suffix in [&b"/"[..], b"/."] {
+                assert_eq!(
+                    summarize(
+                        [Ok(lchown(&[link_bytes, suffix].concat()))],
+                        &[],
+                        program_state()
+                    )
+                    .unwrap(),
+                    vec![
+                        ProgramAction::Read(link.clone()),
+                        ProgramAction::Write(target.clone()),
+                        ProgramAction::Syscalls([name.into()].into()),
+                    ]
+                );
+            }
         }
     }
 
@@ -2399,6 +2425,11 @@ mod tests {
         File::create(&target).unwrap();
         unix::fs::symlink(&target, &link).unwrap();
         let link_bytes = link.as_os_str().as_bytes();
+        let stat_buf = Expression::Struct(HashMap::from([("st_size".to_owned(), int_literal(0))]));
+        let statfs_buf = Expression::Struct(HashMap::from([(
+            "f_type".to_owned(),
+            named_symbol("TMPFS_MAGIC"),
+        )]));
         for (name, args) in [
             ("access", vec![buf_expr(link_bytes), named_symbol("R_OK")]),
             (
@@ -2423,14 +2454,22 @@ mod tests {
                 vec![buf_expr(link_bytes), buf_expr(b""), int_literal(4096)],
             ),
             (
-                "statfs",
+                "fstatat64",
                 vec![
-                    buf_expr(link_bytes),
-                    Expression::Struct(HashMap::from([(
-                        "f_type".to_owned(),
-                        named_symbol("TMPFS_MAGIC"),
-                    )])),
+                    fd_expr(3, temp_dir.path()),
+                    buf_expr(b"link"),
+                    stat_buf.clone(),
+                    int_literal(0),
                 ],
+            ),
+            ("lstat64", vec![buf_expr(link_bytes), stat_buf.clone()]),
+            ("oldlstat", vec![buf_expr(link_bytes), stat_buf.clone()]),
+            ("oldstat", vec![buf_expr(link_bytes), stat_buf.clone()]),
+            ("stat64", vec![buf_expr(link_bytes), stat_buf.clone()]),
+            ("statfs", vec![buf_expr(link_bytes), statfs_buf.clone()]),
+            (
+                "statfs64",
+                vec![buf_expr(link_bytes), int_literal(84), statfs_buf.clone()],
             ),
         ] {
             assert_eq!(

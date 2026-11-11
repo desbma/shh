@@ -96,6 +96,9 @@ if kind == 'mkdir-p':
         ]
     }
 
+    /// C program making a syscall of a given kind on a path through the 32-bit x86 ABI
+    const SYSCALL_32BIT_SRC: &str = include_str!("syscall_32bit.c");
+
     /// Run `shh run` for a given command, and return generated systemd options
     fn generate_options(cmd: &[&str], run_opts: &[&str]) -> Vec<String> {
         const START_OPTION_OUTPUT_SNIPPET_PREFIX: &str =
@@ -1101,6 +1104,48 @@ else:
                 continue;
             }
             profile_and_run(&path_syscall_cmd(kind, path), false);
+        }
+    }
+
+    #[test]
+    fn systemd_run_32bit_abi() {
+        // 32-bit x86 programs making one syscall named differently from its x86_64 call: writes on the tmpfs of
+        // the test environment, reads on a pre-existing file hidden by PrivateTmp=, in the /tmp tmpfs for an
+        // inode number fitting in the 16 bits of oldstat
+        let bin_dir = tempfile::tempdir_in("/var/lib").unwrap();
+        let bin = bin_dir.path().join("syscall_32bit");
+        Command::new("gcc")
+            .args(["-m32", "-x", "c", "-o"])
+            .arg(&bin)
+            .arg("-")
+            .write_stdin(SYSCALL_32BIT_SRC)
+            .unwrap();
+        let written = tempfile::NamedTempFile::new_in("/mnt/tmp").unwrap();
+        let read = tempfile::NamedTempFile::new_in("/tmp").unwrap();
+        for (kind, path) in [
+            ("chown32", written.path()),
+            ("fchown32", written.path()),
+            ("ioctl-setflags32", written.path()),
+            ("lchown32", written.path()),
+            ("truncate64", written.path()),
+            ("utimensat_time64", written.path()),
+            ("fstatat64", read.path()),
+            ("lstat64", read.path()),
+            ("oldlstat", read.path()),
+            ("oldstat", read.path()),
+            ("stat64", read.path()),
+            ("statfs64", read.path()),
+        ] {
+            let cmd = [bin.to_str().unwrap(), kind, path.to_str().unwrap()];
+            for shh_opts in &*ALL_SHH_RUN_OPTS {
+                if shh_opts.contains(&"aggressive") {
+                    // SystemCallArchitectures=native kills 32-bit programs
+                    continue;
+                }
+                eprintln!("shh run option: {}", shh_opts.join(" "));
+                let sd_opts = generate_options(&cmd, shh_opts);
+                let _ = systemd_run(&cmd, &sd_opts, false);
+            }
         }
     }
 

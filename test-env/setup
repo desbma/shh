@@ -42,6 +42,7 @@ readonly PACKAGES=(
     caddy
     curl
     dbus
+    gcc-multilib
     iputils-ping
     iproute2
     linux-image-amd64

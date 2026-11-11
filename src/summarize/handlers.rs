@@ -1215,7 +1215,9 @@ impl SyscallHandler for IoctlHandler {
         state: &mut ProgramState,
     ) -> Result<(), HandlerError> {
         /// Requests changing the attributes of the file of the descriptor
-        const ATTR_WRITE_REQUESTS: [&str; 5] = [
+        const ATTR_WRITE_REQUESTS: [&str; 7] = [
+            "FS_IOC32_SETFLAGS",
+            "FS_IOC32_SETVERSION",
             "FS_IOC_ENABLE_VERITY",
             "FS_IOC_FSSETXATTR",
             "FS_IOC_SETFLAGS",
