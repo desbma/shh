@@ -706,12 +706,46 @@ mod tests {
     }
 
     #[test]
-    fn resolve_private_devices_base_write() {
+    fn resolve_private_devices() {
         let _ = simple_logger::SimpleLogger::new().init();
 
         let (opts, hardening_opts) = test_options_standard(&["PrivateDevices"]);
-        let actions = [ProgramAction::Write("/dev".into())];
-        assert!(resolve(&opts, &actions, &hardening_opts).is_empty());
+        let expected = [OptionWithValue {
+            name: "PrivateDevices",
+            value: OptionValue::Boolean(true),
+        }];
+        for action in [
+            ProgramAction::Read("/dev/null".into()),
+            ProgramAction::Read("/dev/zero".into()),
+            ProgramAction::Read("/dev/full".into()),
+            ProgramAction::Read("/dev/random".into()),
+            ProgramAction::Read("/dev/urandom".into()),
+            ProgramAction::Read("/dev/tty".into()),
+            ProgramAction::Read("/dev/ptmx".into()),
+            ProgramAction::Read("/dev/log".into()),
+            ProgramAction::Write("/dev/pts/0".into()),
+            ProgramAction::Write("/dev/shm".into()),
+            ProgramAction::Write("/dev/mqueue".into()),
+            ProgramAction::Write("/dev/hugepages".into()),
+            ProgramAction::Create("/dev/shm/data".into()),
+            ProgramAction::Write("/dev/shm/data".into()),
+            ProgramAction::Remove("/dev/shm/data".into()),
+        ] {
+            assert_eq!(resolve(&opts, &[action], &hardening_opts), expected);
+        }
+        // Writes on the read only /dev outside the host mounts kept below it, and accesses to removed paths
+        for action in [
+            ProgramAction::Write("/dev".into()),
+            ProgramAction::Write("/dev/null".into()),
+            ProgramAction::Write("/dev/log".into()),
+            ProgramAction::Create("/dev/null".into()),
+            ProgramAction::Remove("/dev/null".into()),
+            ProgramAction::Remove("/dev/shm".into()),
+            ProgramAction::Read("/dev/kmsg".into()),
+            ProgramAction::Create("/dev/data".into()),
+        ] {
+            assert!(resolve(&opts, &[action], &hardening_opts).is_empty());
+        }
     }
 
     #[test]

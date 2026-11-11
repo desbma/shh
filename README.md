@@ -124,9 +124,9 @@ $ shh run --mode aggressive --filesystem-whitelisting --network-firewalling -- c
 ...
 -------- Start of suggested service options --------
 ProtectSystem=strict
-ProtectHome=true
 PrivateTmp=disconnected
 PrivateDevices=true
+PrivateMounts=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true
@@ -138,12 +138,11 @@ ProtectClock=true
 MemoryDenyWriteExecute=true
 SystemCallArchitectures=native
 ReadOnlyPaths=-/
-ReadWritePaths=-/dev
-InaccessiblePaths=-/boot -/home -/lost+found -/media -/mnt -/opt -/root -/srv -/sys -/tmp -/var
-TemporaryFileSystem=/usr:ro
-BindReadOnlyPaths=-/usr/bin -/usr/lib -/usr/lib64 -/usr/local -/usr/share
+InaccessiblePaths=-/boot -/data -/efi -/mnt -/opt -/root -/srv -/sys -/tmp -/var
+TemporaryFileSystem=/dev:ro /home:ro /usr:ro
+BindReadOnlyPaths=-/dev -/home -/usr
 NoExecPaths=-/
-ExecPaths=-/usr/bin/curl -/usr/lib/x86_64-linux-gnu
+ExecPaths=-/usr/bin -/usr/lib
 RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
 SocketBindDeny=ipv4:tcp
 SocketBindDeny=ipv4:udp
@@ -151,7 +150,7 @@ SocketBindDeny=ipv6:tcp
 SocketBindDeny=ipv6:udp
 IPAddressDeny=any
 IPAddressAllow=[redacted]
-CapabilityBoundingSet=~CAP_BLOCK_SUSPEND CAP_BPF CAP_CHOWN CAP_MKNOD CAP_NET_RAW CAP_PERFMON CAP_SYS_BOOT CAP_SYS_CHROOT CAP_SYS_MODULE CAP_SYS_NICE CAP_SYS_PACCT CAP_SYS_PTRACE CAP_SYS_TIME CAP_SYSLOG CAP_WAKE_ALARM
+CapabilityBoundingSet=~CAP_BLOCK_SUSPEND CAP_BPF CAP_CHOWN CAP_IPC_LOCK CAP_MKNOD CAP_NET_RAW CAP_PERFMON CAP_SYS_BOOT CAP_SYS_CHROOT CAP_SYS_MODULE CAP_SYS_NICE CAP_SYS_PACCT CAP_SYS_PTRACE CAP_SYS_TIME CAP_SYSLOG CAP_WAKE_ALARM
 SystemCallFilter=~@aio:EPERM @chown:EPERM @clock:EPERM @cpu-emulation:EPERM @debug:EPERM @ipc:EPERM @keyring:EPERM @memlock:EPERM @module:EPERM @mount:EPERM @obsolete:EPERM @pkey:EPERM @privileged:EPERM @raw-io:EPERM @reboot:EPERM @resources:EPERM @sandbox:EPERM @setuid:EPERM @swap:EPERM @sync:EPERM @timer:EPERM
 -------- End of suggested service options --------
 ```

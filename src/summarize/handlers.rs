@@ -835,22 +835,28 @@ impl SyscallHandler for OpenHandler {
         // A creation failing on an existing entry, like with O_EXCL, depends on it
         let existing = create && !sc.is_successful();
         if !is_pseudo_path(&path) {
-            // Set actions from flags
-            if existing {
-                actions.push(ProgramAction::Read(path.clone()));
-            }
-            if create {
-                actions.push(ProgramAction::Create(path.clone()));
-            }
-            if write
-            // char devices can be written to, even if filesystem is mounted read only
-            && !path.metadata().is_ok_and(|m| m.file_type().is_char_device())
-            {
-                actions.push(ProgramAction::Write(path.clone()));
-            }
-            if read && !existing {
-                assert!(!path.to_str().is_some_and(|p| p.starts_with("net:")));
-                actions.push(ProgramAction::Read(path.clone()));
+            let char_device = path
+                .metadata()
+                .is_ok_and(|m| m.file_type().is_char_device());
+            if char_device && sc.is_successful() {
+                // A char device is never created by the open that returns it
+                actions.push(ProgramAction::Read(path));
+            } else {
+                // Set actions from flags
+                if existing {
+                    actions.push(ProgramAction::Read(path.clone()));
+                }
+                if create {
+                    actions.push(ProgramAction::Create(path.clone()));
+                }
+                // Character devices remain writable on a read-only filesystem
+                if write && !char_device {
+                    actions.push(ProgramAction::Write(path.clone()));
+                }
+                if read && !existing {
+                    assert!(!path.to_str().is_some_and(|p| p.starts_with("net:")));
+                    actions.push(ProgramAction::Read(path.clone()));
+                }
             }
         }
 

@@ -293,6 +293,25 @@ if kind == 'mkdir-p':
     }
 
     #[test]
+    fn systemd_run_touch_dev_null() {
+        let cmd = ["touch", "/dev/null"];
+        for user in [false, true] {
+            profile_and_run(&cmd, user);
+        }
+    }
+
+    #[test]
+    fn systemd_run_write_dev_kmsg() {
+        // Only root can open /dev/kmsg for writing
+        let cmd = [
+            "python3",
+            "-c",
+            "import os; os.close(os.open('/dev/kmsg', os.O_WRONLY))",
+        ];
+        profile_and_run(&cmd, false);
+    }
+
+    #[test]
     fn systemd_run_ls_dev() {
         let cmd = ["ls", "/dev/"];
         for user in [false, true] {

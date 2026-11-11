@@ -178,33 +178,28 @@ impl OptionSpec for PrivateDevices {
     }
 
     fn build(&self, _ctx: &OptionContext<'_>) -> OptionDescription {
+        let host_mounts =
+            ["pts/", "shm/", "mqueue/", "hugepages/"].map(|p| PathBuf::from("/dev/").join(p));
         OptionDescription {
             name: "PrivateDevices",
             possible_values: vec![OptionValueDescription {
                 value: OptionValue::Boolean(true),
                 desc: OptionEffect::Simple(OptionValueEffect::Multiple(vec![
-                    OptionValueEffect::EmptyPath(EmptyPathDescription {
+                    // https://github.com/systemd/systemd/blob/v254/src/core/namespace.c#L912
+                    OptionValueEffect::RemovePath(PathDescription::Base {
                         base: "/dev/".into(),
-                        base_ro: true,
-                        exceptions_ro: vec![],
-                        // https://github.com/systemd/systemd/blob/v254/src/core/namespace.c#L912
-                        exceptions_rw: [
-                            "null",
-                            "zero",
-                            "full",
-                            "random",
-                            "urandom",
-                            "tty",
-                            "pts/",
-                            "ptmx",
-                            "shm/",
-                            "mqueue/",
-                            "hugepages/",
-                            "log",
+                        exceptions: [
+                            "null", "zero", "full", "random", "urandom", "tty", "ptmx", "log",
                         ]
                         .iter()
                         .map(|p| PathBuf::from("/dev/").join(p))
+                        .chain(host_mounts.clone())
                         .collect(),
+                    }),
+                    // The new /dev is read only, unlike the host mounts kept below it
+                    OptionValueEffect::DenyWrite(PathDescription::Base {
+                        base: "/dev/".into(),
+                        exceptions: host_mounts.into(),
                     }),
                     OptionValueEffect::DenySyscalls(DenySyscalls::Class("raw-io")),
                     OptionValueEffect::DenyAction(DeniableAction::MknodSpecial),

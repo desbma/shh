@@ -61,7 +61,7 @@ pub(crate) enum ProgramAction {
     Syscalls(HashSet<SyscallName>),
     /// Inhibit suspend
     Wakeup,
-    /// Write to a path (data, metadata...)
+    /// Modify a path on its filesystem (content, metadata...)
     Write(PathBuf),
     /// Memory mapping with write and execute bits, or execute bit added
     /// after initial mapping
@@ -2171,6 +2171,58 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn open_char_device_reads() {
+        let _ = simple_logger::SimpleLogger::new().init();
+
+        for flags in [
+            &["O_WRONLY"][..],
+            &["O_WRONLY", "O_CREAT", "O_TRUNC"],
+            &["O_RDWR"],
+        ] {
+            let sc = make_syscall(
+                "openat",
+                vec![
+                    named_symbol("AT_FDCWD"),
+                    buf_expr(b"/dev/null"),
+                    binary_or_flags(flags),
+                    int_literal(0o666),
+                ],
+                3,
+            );
+            assert_eq!(
+                summarize_syscall(sc),
+                vec![
+                    ProgramAction::Read("/dev/null".into()),
+                    ProgramAction::Syscalls(["openat".into()].into()),
+                ]
+            );
+        }
+
+        // Failing with EEXIST, which the parser keeps, on a symlink the exclusive creation does not follow
+        let temp_dir = tempfile::tempdir().unwrap();
+        let link = temp_dir.path().join("link");
+        unix::fs::symlink("/dev/null", &link).unwrap();
+        let sc = make_syscall(
+            "openat",
+            vec![
+                named_symbol("AT_FDCWD"),
+                buf_expr(link.as_os_str().as_bytes()),
+                binary_or_flags(&["O_WRONLY", "O_CREAT", "O_EXCL"]),
+                int_literal(0o666),
+            ],
+            -1,
+        );
+        assert_eq!(
+            summarize_syscall(sc),
+            vec![
+                ProgramAction::Read(link.clone()),
+                ProgramAction::Create(link),
+                ProgramAction::Syscalls(["openat".into()].into()),
+            ]
+        );
     }
 
     #[test]
